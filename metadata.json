@@ -1,0 +1,8 @@
+{
+  "name": "Project SBM Online",
+  "description": "School-Based Management self-assessment, monitoring, administration, and reporting platform for the Department of Education Regional Office VIII.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

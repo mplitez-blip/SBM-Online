@@ -1,0 +1,263 @@
+// Prisma Schema for Project SBM Online Relational PostgreSQL Database
+// Configured according to DepEd Regional Office specification
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ==========================================
+// ENUMS
+// ==========================================
+
+enum UserRole {
+  regional
+  division
+  school
+}
+
+enum AssessmentStatus {
+  Draft
+  Submitted
+  // Note: "Not started" is NOT stored as a database status.
+  // It is computed dynamically when an assessment record does not exist.
+}
+
+enum SchoolYearStatus {
+  Active
+  Open
+  Closed
+}
+
+// ==========================================
+// CORE ENTITIES
+// ==========================================
+
+/// Division entity representing a Schools Division Office (SDO).
+/// A Division has many Schools and may have one or more Division administrators.
+model Division {
+  id           Int      @id @default(autoincrement())
+  divisionCode String   @unique @map("division_code")
+  divisionName String   @map("division_name")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  // Relationships
+  schools School[]
+  users   User[]
+
+  @@map("divisions")
+}
+
+/// Classification options for schools (e.g., Elementary, JHS, Integrated).
+model ClassificationOption {
+  id        Int      @id @default(autoincrement())
+  code      String   @unique
+  name      String
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relationships
+  schools School[]
+
+  @@map("classification_options")
+}
+
+/// School entity belonging to one Division.
+/// A School may have at most one active School user account.
+model School {
+  id                     Int                   @id @default(autoincrement())
+  schoolId               String                @unique @map("school_id") // DepEd 6-digit unique identifier
+  schoolName             String                @map("school_name")
+  divisionId             Int                   @map("division_id")
+  division               Division              @relation(fields: [divisionId], references: [id], onDelete: Cascade)
+  district               String
+  classification         String // Display label or code
+  classificationOptionId Int?                  @map("classification_option_id")
+  classificationOption   ClassificationOption? @relation(fields: [classificationOptionId], references: [id], onDelete: SetNull)
+  schoolHead             String                @map("school_head")
+  createdAt              DateTime              @default(now()) @map("created_at")
+  updatedAt              DateTime              @updatedAt @map("updated_at")
+
+  // Relationships
+  // A School may have at most one active School account (enforced via unique schoolId on User)
+  schoolAccount User?
+  // A School has at most one Assessment per School Year
+  assessments   Assessment[]
+
+  @@map("schools")
+}
+
+/// User entity handling Regional, Division, and School role-based authentication.
+model User {
+  id           Int      @id @default(autoincrement())
+  username     String   @unique // User username unique constraint
+  email        String?
+  passwordHash String   @map("password_hash")
+  role         UserRole // 'regional' | 'division' | 'school'
+  fullName     String   @map("full_name")
+  isActive     Boolean  @default(true) @map("is_active")
+
+  // Optional Division relationship (for Division administrators)
+  divisionId Int?      @map("division_id")
+  division   Division? @relation(fields: [divisionId], references: [id], onDelete: SetNull)
+
+  // Optional School relationship (1-to-1: A School may have one active School account)
+  schoolId Int?    @unique @map("school_id")
+  school   School? @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+
+  failedAttempts Int       @default(0) @map("failed_attempts")
+  lockoutUntil   DateTime? @map("lockout_until")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  // Relationships
+  submittedAssessments Assessment[] @relation("AssessmentSubmitter")
+  auditLogs            AuditLog[]   @relation("UserAuditLogs")
+
+  @@map("users")
+}
+
+/// School Year lifecycle entity.
+/// Unique constraint on label. Exactly one school year is Active at any time.
+model SchoolYear {
+  id        Int              @id @default(autoincrement())
+  label     String           @unique // School Year label unique constraint (e.g. "2026-2027")
+  status    SchoolYearStatus @default(Open)
+  startDate DateTime?        @map("start_date")
+  endDate   DateTime?        @map("end_date")
+  createdAt DateTime         @default(now()) @map("created_at")
+  updatedAt DateTime         @updatedAt @map("updated_at")
+
+  // Relationships
+  // A SchoolYear has one AssessmentForm
+  assessmentForm AssessmentForm?
+  // Assessments conducted within this School Year
+  assessments    Assessment[]
+
+  @@map("school_years")
+}
+
+/// Assessment Form entity linked 1-to-1 with a SchoolYear.
+model AssessmentForm {
+  id                   Int        @id @default(autoincrement())
+  schoolYearId         Int        @unique @map("school_year_id") // A SchoolYear has one AssessmentForm
+  schoolYear           SchoolYear @relation(fields: [schoolYearId], references: [id], onDelete: Cascade)
+  title                String
+  instructions         String?
+  isEditable           Boolean    @default(true) @map("is_editable")
+  ratingLabel1         String     @default("Level 1: Developing") @map("rating_label_1")
+  ratingLabel2         String     @default("Level 2: Maturing") @map("rating_label_2")
+  ratingLabel3         String     @default("Level 3: Advanced") @map("rating_label_3")
+  ratingLabel4         String     @default("Level 4: Exemplary") @map("rating_label_4")
+  requireAllIndicators Boolean    @default(true) @map("require_all_indicators")
+  requireGlobalRemarks Boolean    @default(true) @map("require_global_remarks")
+  createdAt            DateTime   @default(now()) @map("created_at")
+  updatedAt            DateTime   @updatedAt @map("updated_at")
+
+  // Relationships
+  // An AssessmentForm has many indicators
+  indicators AssessmentFormIndicator[]
+
+  @@map("assessment_forms")
+}
+
+/// Indicator entity within an Assessment Form.
+/// Enforces unique indicatorNumber per Assessment Form.
+model AssessmentFormIndicator {
+  id              Int            @id @default(autoincrement())
+  formId          Int            @map("form_id")
+  form            AssessmentForm @relation(fields: [formId], references: [id], onDelete: Cascade)
+  sectionName     String         @map("section_name") // e.g. "Leadership and Governance"
+  sectionOrder    Int            @default(1) @map("section_order")
+  indicatorNumber String         @map("indicator_number") // e.g. "1.1", "1.2"
+  content         String
+  orderIndex      Int            @default(1) @map("order_index")
+  isActive        Boolean        @default(true) @map("is_active")
+  createdAt       DateTime       @default(now()) @map("created_at")
+  updatedAt       DateTime       @updatedAt @map("updated_at")
+
+  // Relationships
+  responses AssessmentResponse[]
+
+  // Unique constraint: Assessment Form plus indicator number
+  @@unique([formId, indicatorNumber], name: "uq_form_indicator_number")
+  @@map("assessment_form_indicators")
+}
+
+/// Assessment record for a School in a specific School Year.
+/// A School has at most one Assessment per School Year.
+model Assessment {
+  id                Int              @id @default(autoincrement())
+  schoolId          Int              @map("school_id")
+  school            School           @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  schoolYearId      Int              @map("school_year_id")
+  schoolYear        SchoolYear       @relation(fields: [schoolYearId], references: [id], onDelete: Cascade)
+  status            AssessmentStatus @default(Draft) // Draft or Submitted
+  calculatedAverage Decimal?         @map("calculated_average") @db.Decimal(4, 2)
+  globalRemarks     String?          @map("global_remarks")
+  submittedAt       DateTime?        @map("submitted_at")
+  submittedById     Int?             @map("submitted_by_id")
+  submittedBy       User?            @relation("AssessmentSubmitter", fields: [submittedById], references: [id], onDelete: SetNull)
+  isLocked          Boolean          @default(false) @map("is_locked")
+  createdAt         DateTime         @default(now()) @map("created_at")
+  updatedAt         DateTime         @updatedAt @map("updated_at")
+
+  // Relationships
+  // An Assessment has many responses
+  responses AssessmentResponse[]
+
+  // Unique constraint: School plus School Year assessment
+  @@unique([schoolId, schoolYearId], name: "uq_school_school_year_assessment")
+  @@map("assessments")
+}
+
+/// Individual response to an indicator in an assessment.
+/// A response belongs to one assessment and one form indicator.
+model AssessmentResponse {
+  id           Int                     @id @default(autoincrement())
+  assessmentId Int                     @map("assessment_id")
+  assessment   Assessment              @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  indicatorId  Int                     @map("indicator_id")
+  indicator    AssessmentFormIndicator @relation(fields: [indicatorId], references: [id], onDelete: Cascade)
+  rating       Int? // 1, 2, 3, or 4
+  remarks      String?
+  createdAt    DateTime                @default(now()) @map("created_at")
+  updatedAt    DateTime                @updatedAt @map("updated_at")
+
+  // Unique constraint: One response per indicator per assessment
+  @@unique([assessmentId, indicatorId], name: "uq_assessment_indicator_response")
+  @@map("assessment_responses")
+}
+
+/// System settings entity storing structured customization values as JSON.
+model SystemSetting {
+  id          Int      @id @default(autoincrement())
+  key         String   @unique // e.g. "login_customization", "footer_customization", "regional_branding"
+  value       Json // Structured JSON payload
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("system_settings")
+}
+
+/// Audit Log recording user actions and affected resources.
+model AuditLog {
+  id           Int      @id @default(autoincrement())
+  userId       Int?     @map("user_id")
+  user         User?    @relation("UserAuditLogs", fields: [userId], references: [id], onDelete: SetNull)
+  action       String // e.g. "ACTIVATE_SCHOOL_YEAR", "SUBMIT_ASSESSMENT", "UPDATE_FORM"
+  resourceType String   @map("resource_type") // e.g. "SchoolYear", "Assessment", "User"
+  resourceId   String?  @map("resource_id") // Identifier of affected resource
+  details      Json? // Contextual payload / diff
+  ipAddress    String?  @map("ip_address")
+  userAgent    String?  @map("user_agent")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@map("audit_logs")
+}
