@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext.tsx';
+import { ExportConsolidatedModal } from '../common/ExportConsolidatedModal.tsx';
 
 interface RegionalDashboardProps {
   onNavigate: (view: string, filterParams?: any) => void;
@@ -10,6 +11,7 @@ export const RegionalDashboard: React.FC<RegionalDashboardProps> = ({ onNavigate
   const [stats, setStats] = useState<any>(null);
   const [summaryData, setSummaryData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [showExportModal, setShowExportModal] = useState<boolean>(false);
 
   useEffect(() => {
     loadDashboardData();
@@ -57,8 +59,14 @@ export const RegionalDashboard: React.FC<RegionalDashboardProps> = ({ onNavigate
       {/* Title & Active School Year Banner */}
       <div className="d-flex flex-wrap justify-content-between align-items-center mb-4 pb-2 border-bottom">
         <div>
-          <div className="badge bg-danger text-uppercase px-2 py-1 mb-1">
-            Regional Office Administration
+          <div className="d-flex align-items-center gap-2 mb-1">
+            <span className="badge bg-danger text-uppercase px-2 py-1">
+              Regional Office Administration
+            </span>
+            <span className="badge bg-success px-2 py-1">
+              <i className="bi bi-calendar-check me-1"></i>
+              Active Year: SY {stats?.activeSchoolYear?.name || activeSchoolYear?.name || 'Active'}
+            </span>
           </div>
           <h1 className="h3 fw-bold text-dark mb-0">Regional SBM Executive Dashboard</h1>
           <div className="text-muted small">
@@ -72,19 +80,19 @@ export const RegionalDashboard: React.FC<RegionalDashboardProps> = ({ onNavigate
           >
             <i className="bi bi-arrow-clockwise"></i> Refresh
           </button>
-          <a
-            href="/api/export/excel"
+          <button
             className="btn btn-success btn-sm d-flex align-items-center gap-1 shadow-sm"
+            onClick={() => setShowExportModal(true)}
           >
-            <i className="bi bi-file-earmark-excel"></i> Export Regional Excel
-          </a>
+            <i className="bi bi-file-earmark-excel"></i> Export Consolidated Excel
+          </button>
         </div>
       </div>
 
-      {/* KPI Cards */}
+      {/* Regional Dashboard KPIs */}
       <div className="row g-3 mb-4">
         {/* Divisions in Scope */}
-        <div className="col-12 col-sm-6 col-xl-2">
+        <div className="col-12 col-sm-6 col-lg">
           <div className="card h-100 border-0 shadow-sm rounded-3">
             <div className="card-body p-3">
               <div className="d-flex align-items-center justify-content-between mb-2">
@@ -94,13 +102,13 @@ export const RegionalDashboard: React.FC<RegionalDashboardProps> = ({ onNavigate
                 </div>
               </div>
               <h2 className="display-6 fw-bold mb-0 text-dark">{stats?.divisionsInScope || 13}</h2>
-              <div className="text-muted small mt-1">13 Schools Divisions</div>
+              <div className="text-muted small mt-1">13 Schools Divisions in RO8</div>
             </div>
           </div>
         </div>
 
         {/* Schools in Scope */}
-        <div className="col-12 col-sm-6 col-xl-2">
+        <div className="col-12 col-sm-6 col-lg">
           <div className="card h-100 border-0 shadow-sm rounded-3">
             <div className="card-body p-3">
               <div className="d-flex align-items-center justify-content-between mb-2">
@@ -110,13 +118,13 @@ export const RegionalDashboard: React.FC<RegionalDashboardProps> = ({ onNavigate
                 </div>
               </div>
               <h2 className="display-6 fw-bold mb-0 text-dark">{stats?.schoolsInScope || 0}</h2>
-              <div className="text-muted small mt-1">Active Schools in RO8</div>
+              <div className="text-muted small mt-1">Active Schools in Scope</div>
             </div>
           </div>
         </div>
 
         {/* Submitted */}
-        <div className="col-12 col-sm-6 col-xl-2">
+        <div className="col-12 col-sm-6 col-lg">
           <div className="card h-100 border-0 shadow-sm rounded-3 border-start border-success border-4">
             <div className="card-body p-3">
               <div className="d-flex align-items-center justify-content-between mb-2">
@@ -125,7 +133,7 @@ export const RegionalDashboard: React.FC<RegionalDashboardProps> = ({ onNavigate
                   <i className="bi bi-check-circle-fill fs-5"></i>
                 </div>
               </div>
-              <h2 className="display-6 fw-bold mb-0 text-success">{stats?.submittedCount || 0}</h2>
+              <h2 className="display-6 fw-bold mb-0 text-success">{stats?.submitted ?? stats?.submittedCount ?? 0}</h2>
               <div className="text-success small mt-1 fw-semibold">
                 {stats?.completionPercentage || 0}% Completion Rate
               </div>
@@ -133,44 +141,28 @@ export const RegionalDashboard: React.FC<RegionalDashboardProps> = ({ onNavigate
           </div>
         </div>
 
-        {/* Draft Assessments */}
-        <div className="col-12 col-sm-6 col-xl-2">
+        {/* Draft */}
+        <div className="col-12 col-sm-6 col-lg">
           <div className="card h-100 border-0 shadow-sm rounded-3">
             <div className="card-body p-3">
               <div className="d-flex align-items-center justify-content-between mb-2">
-                <span className="text-muted small fw-semibold">Draft Assessments</span>
+                <span className="text-muted small fw-semibold">Draft</span>
                 <div className="bg-warning bg-opacity-10 text-warning rounded p-2">
                   <i className="bi bi-pencil-square fs-5"></i>
                 </div>
               </div>
-              <h2 className="display-6 fw-bold mb-0 text-warning">{stats?.draftCount || 0}</h2>
+              <h2 className="display-6 fw-bold mb-0 text-warning">{stats?.draft ?? stats?.draftCount ?? 0}</h2>
               <div className="text-muted small mt-1">Self-assessments in progress</div>
             </div>
           </div>
         </div>
 
-        {/* Not Started */}
-        <div className="col-12 col-sm-6 col-xl-2">
-          <div className="card h-100 border-0 shadow-sm rounded-3">
-            <div className="card-body p-3">
-              <div className="d-flex align-items-center justify-content-between mb-2">
-                <span className="text-muted small fw-semibold">Not Started</span>
-                <div className="bg-secondary bg-opacity-10 text-secondary rounded p-2">
-                  <i className="bi bi-hourglass-split fs-5"></i>
-                </div>
-              </div>
-              <h2 className="display-6 fw-bold mb-0 text-secondary">{stats?.notStartedCount || 0}</h2>
-              <div className="text-muted small mt-1">Pending school initiation</div>
-            </div>
-          </div>
-        </div>
-
-        {/* Regional Average Rating */}
-        <div className="col-12 col-sm-6 col-xl-2">
+        {/* Average rating */}
+        <div className="col-12 col-sm-6 col-lg">
           <div className="card h-100 border-0 shadow-sm rounded-3 bg-primary text-white">
             <div className="card-body p-3">
               <div className="d-flex align-items-center justify-content-between mb-2">
-                <span className="text-white-75 small fw-semibold">Regional Mean</span>
+                <span className="text-white-75 small fw-semibold">Average rating</span>
                 <div className="bg-white bg-opacity-20 text-white rounded p-2">
                   <i className="bi bi-star-fill fs-5"></i>
                 </div>
@@ -354,6 +346,12 @@ export const RegionalDashboard: React.FC<RegionalDashboardProps> = ({ onNavigate
           </table>
         </div>
       </div>
+
+      <ExportConsolidatedModal
+        isOpen={showExportModal}
+        onClose={() => setShowExportModal(false)}
+        defaultSchoolYearId={activeSchoolYear?.id}
+      />
     </div>
   );
 };

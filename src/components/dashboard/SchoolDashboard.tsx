@@ -150,19 +150,22 @@ export const SchoolDashboard: React.FC<SchoolDashboardProps> = ({ onNavigate }) 
                     </div>
                   </div>
 
-                  <div className="d-flex flex-wrap gap-2">
+                  <div className="d-flex flex-wrap gap-3">
                     <button
                       className="btn btn-primary px-4 py-2 fw-semibold shadow-sm d-flex align-items-center gap-2"
                       onClick={() => onNavigate('assessment')}
                     >
-                      <i className={`bi bi-${isSubmitted ? 'eye' : 'pencil-square'}`}></i>
-                      {isSubmitted ? 'View Submitted Assessment' : isDraft ? 'Continue Assessment' : 'Start SBM Assessment'}
+                      <i className="bi bi-pencil-square"></i>
+                      <span>Fill in Self-Assessment</span>
+                      {isSubmitted && <span className="badge bg-success-subtle text-white ms-1">Submitted</span>}
+                      {isDraft && <span className="badge bg-warning text-dark ms-1">Draft</span>}
                     </button>
                     <button
-                      className="btn btn-outline-secondary px-3 py-2"
+                      className="btn btn-outline-primary px-4 py-2 fw-semibold shadow-sm d-flex align-items-center gap-2"
                       onClick={() => onNavigate('history')}
                     >
-                      <i className="bi bi-clock-history me-1"></i> View Historical Records
+                      <i className="bi bi-file-earmark-bar-graph"></i>
+                      <span>View Your Data</span>
                     </button>
                   </div>
                 </>

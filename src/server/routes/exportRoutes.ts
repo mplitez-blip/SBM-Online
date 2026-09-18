@@ -1,5 +1,4 @@
 import { Router, Response } from 'express';
-import ExcelJS from 'exceljs';
 import { db } from '../../db/index.ts';
 import {
   divisions,
@@ -18,396 +17,246 @@ import {
   requireRole,
   logAudit,
 } from '../auth.ts';
+import {
+  exportConsolidatedExcelReport,
+  ConsolidatedExportInput,
+} from '../services/exportService.ts';
 
 const router = Router();
 
 // GET /api/export/excel - Multi-sheet ExcelJS export
-router.get('/excel', requireAuth, requireRole('regional', 'division'), async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const { schoolYearId, divisionId } = req.query;
+router.get(
+  '/excel',
+  requireAuth,
+  requireRole('regional', 'division'),
+  async (req: AuthenticatedRequest, res: Response) => {
+    let cleanupHandler: (() => Promise<void>) | null = null;
 
-    // 1. Resolve target school year
-    let targetSyId: number;
-    if (schoolYearId) {
-      targetSyId = parseInt(String(schoolYearId), 10);
-    } else {
-      const activeSy = await db.select().from(schoolYears).where(eq(schoolYears.isActive, true));
-      if (activeSy.length === 0) return res.status(400).json({ error: 'No active School Year found.' });
-      targetSyId = activeSy[0].id;
-    }
+    try {
+      // 1. Validate user role
+      if (req.user!.role === 'school') {
+        return res.status(403).json({
+          error: 'Schools cannot access consolidated exports. Please use your school assessment dashboard.',
+        });
+      }
 
-    const syRecord = await db.select().from(schoolYears).where(eq(schoolYears.id, targetSyId));
-    const syName = syRecord[0]?.name || 'Unknown SY';
+      const { schoolYearId, divisionId } = req.query;
 
-    // 2. Resolve Form & Sections & Indicators (Dynamic, never hardcoded)
-    const formRes = await db.select().from(assessmentForms).where(eq(assessmentForms.schoolYearId, targetSyId));
-    if (formRes.length === 0) {
-      return res.status(400).json({ error: 'No assessment form exists for the selected School Year.' });
-    }
-    const form = formRes[0];
+      // 2. Resolve target school year (user MUST select a configured School Year)
+      if (!schoolYearId) {
+        return res.status(400).json({
+          error: 'Please select a configured School Year for export.',
+        });
+      }
 
-    const sections = await db
-      .select()
-      .from(formSections)
-      .where(eq(formSections.formId, form.id))
-      .orderBy(formSections.orderIndex);
+      const targetSyId = parseInt(String(schoolYearId), 10);
+      if (isNaN(targetSyId) || targetSyId <= 0) {
+        return res.status(400).json({
+          error: 'Invalid School Year identifier specified.',
+        });
+      }
 
-    const indicators = await db
-      .select()
-      .from(formIndicators)
-      .where(sql`${formIndicators.formId} = ${form.id} AND ${formIndicators.isActive} = true`)
-      .orderBy(formIndicators.orderIndex);
+      const syRecord = await db.select().from(schoolYears).where(eq(schoolYears.id, targetSyId));
+      if (syRecord.length === 0) {
+        return res.status(404).json({
+          error: 'Selected School Year was not found in the system.',
+        });
+      }
+      const syName = syRecord[0].name;
 
-    // 3. Resolve Scoped Schools
-    let targetDivisionId: number | null = null;
-    if (req.user!.role === 'division') {
-      targetDivisionId = req.user!.divisionId;
-    } else if (divisionId) {
-      targetDivisionId = parseInt(String(divisionId), 10);
-    }
+      // 3. Resolve Form & Sections & Indicators at export time
+      const formRes = await db.select().from(assessmentForms).where(eq(assessmentForms.schoolYearId, targetSyId));
+      if (formRes.length === 0) {
+        return res.status(400).json({
+          error: `No assessment form exists for School Year ${syName}. Please configure the form first.`,
+        });
+      }
+      const form = formRes[0];
 
-    let scopedSchools = await db
-      .select({
-        schoolDbId: schools.id,
-        schoolId: schools.schoolId,
-        schoolName: schools.schoolName,
-        divisionId: schools.divisionId,
-        divisionName: divisions.divisionName,
-        district: schools.district,
-        classification: schools.classification,
-        schoolHead: schools.schoolHead,
-      })
-      .from(schools)
-      .innerJoin(divisions, eq(schools.divisionId, divisions.id));
+      const sections = await db
+        .select()
+        .from(formSections)
+        .where(eq(formSections.formId, form.id))
+        .orderBy(formSections.orderIndex);
 
-    if (targetDivisionId) {
-      scopedSchools = scopedSchools.filter((s) => s.divisionId === targetDivisionId);
-    }
+      const allIndicators = await db
+        .select()
+        .from(formIndicators)
+        .where(eq(formIndicators.formId, form.id))
+        .orderBy(formIndicators.orderIndex);
 
-    // 4. Fetch assessments & responses
-    const allAss = await db.select().from(assessments).where(eq(assessments.schoolYearId, targetSyId));
-    const assMap = new Map(allAss.map((a) => [a.schoolId, a]));
+      // Filter active indicators for scoring and summary
+      const activeIndicators = allIndicators.filter((i) => i.isActive);
 
-    const allResponses = await db
-      .select()
-      .from(assessmentResponses)
-      .innerJoin(assessments, eq(assessmentResponses.assessmentId, assessments.id))
-      .where(eq(assessments.schoolYearId, targetSyId));
+      // 4. Resolve Scoped Division
+      let targetDivisionId: number | null = null;
+      let targetDivisionName: string | null = null;
 
-    // Map responses: [assessmentId_indicatorId] -> rating
-    const respMap = new Map<string, number>();
-    for (const r of allResponses) {
-      respMap.set(`${r.assessment_responses.assessmentId}_${r.assessment_responses.indicatorId}`, r.assessment_responses.rating);
-    }
+      if (req.user!.role === 'division') {
+        // Division user is strictly scoped to their assigned division
+        targetDivisionId = req.user!.divisionId;
+      } else if (divisionId && divisionId !== 'all') {
+        // Regional user filtering by specific division
+        targetDivisionId = parseInt(String(divisionId), 10);
+      }
 
-    // 5. Create ExcelJS Workbook
-    const workbook = new ExcelJS.Workbook();
-    workbook.creator = 'Project SBM Online - DepEd Regional Office VIII';
-    workbook.lastModifiedBy = req.user!.fullName;
-    workbook.created = new Date();
+      if (targetDivisionId) {
+        const divRes = await db.select().from(divisions).where(eq(divisions.id, targetDivisionId));
+        if (divRes.length > 0) {
+          targetDivisionName = divRes[0].divisionName;
+        }
+      }
 
-    const headerFill: ExcelJS.Fill = {
-      type: 'pattern',
-      pattern: 'solid',
-      fgColor: { argb: 'FF0038A8' }, // DepEd Blue
-    };
-    const headerFont: Partial<ExcelJS.Font> = {
-      name: 'Arial',
-      size: 11,
-      bold: true,
-      color: { argb: 'FFFFFFFF' },
-    };
+      // 5. Query Scoped Schools
+      let scopedSchools = await db
+        .select({
+          schoolDbId: schools.id,
+          schoolId: schools.schoolId,
+          schoolName: schools.schoolName,
+          divisionId: schools.divisionId,
+          divisionName: divisions.divisionName,
+          district: schools.district,
+          classification: schools.classification,
+          schoolHead: schools.schoolHead,
+        })
+        .from(schools)
+        .innerJoin(divisions, eq(schools.divisionId, divisions.id));
 
-    // ==========================================
-    // SHEET 1: Consolidated Results
-    // ==========================================
-    const wsConsolidated = workbook.addWorksheet('Consolidated Results');
+      if (targetDivisionId) {
+        scopedSchools = scopedSchools.filter((s) => s.divisionId === targetDivisionId);
+      }
 
-    // Headers
-    const colHeaders = [
-      'School ID',
-      'School Name',
-      'Division',
-      'District',
-      'Classification',
-      'School Head',
-      'Status',
-      'Answered Count',
-      'Total Indicators',
-      'Overall Average',
-      'Interpretation',
-      'Submitted At',
-      'Submitted By',
-    ];
+      // 6. Fetch assessments & responses
+      const allAss = await db.select().from(assessments).where(eq(assessments.schoolYearId, targetSyId));
 
-    // Add dynamic section columns
-    for (const sec of sections) {
-      colHeaders.push(`${sec.title} (Avg)`);
-    }
+      const allResponses = await db
+        .select({
+          assessmentId: assessmentResponses.assessmentId,
+          indicatorId: assessmentResponses.indicatorId,
+          rating: assessmentResponses.rating,
+          remarks: assessmentResponses.remarks,
+        })
+        .from(assessmentResponses)
+        .innerJoin(assessments, eq(assessmentResponses.assessmentId, assessments.id))
+        .where(eq(assessments.schoolYearId, targetSyId));
 
-    wsConsolidated.addRow(colHeaders);
-    const headerRow1 = wsConsolidated.getRow(1);
-    headerRow1.height = 28;
-    headerRow1.eachCell((cell) => {
-      cell.fill = headerFill;
-      cell.font = headerFont;
-      cell.alignment = { vertical: 'middle', horizontal: 'center' };
-      cell.border = {
-        top: { style: 'thin' },
-        left: { style: 'thin' },
-        bottom: { style: 'thin' },
-        right: { style: 'thin' },
+      // 7. Assemble Export Input Data
+      const exportData: ConsolidatedExportInput = {
+        schoolYearName: syName,
+        form: {
+          id: form.id,
+          schoolYearId: form.schoolYearId,
+          title: form.title,
+          instructions: form.instructions,
+          ratingLabel1: form.ratingLabel1,
+          ratingLabel2: form.ratingLabel2,
+          ratingLabel3: form.ratingLabel3,
+          ratingLabel4: form.ratingLabel4,
+          status: form.status,
+          allowEditAfterSubmission: form.allowEditAfterSubmission,
+          requireAllIndicators: form.requireAllIndicators,
+          requireGlobalRemarks: form.requireGlobalRemarks,
+          requireIndicatorRemarks: form.requireIndicatorRemarks,
+        },
+        sections: sections.map((s) => ({
+          id: s.id,
+          title: s.title,
+          orderIndex: s.orderIndex,
+        })),
+        indicators: activeIndicators.map((i) => ({
+          id: i.id,
+          sectionId: i.sectionId,
+          code: i.code,
+          content: i.content,
+          orderIndex: i.orderIndex,
+          isActive: i.isActive,
+        })),
+        allIndicatorsIncludingInactive: allIndicators.map((i) => ({
+          id: i.id,
+          sectionId: i.sectionId,
+          code: i.code,
+          content: i.content,
+          orderIndex: i.orderIndex,
+          isActive: i.isActive,
+        })),
+        schools: scopedSchools,
+        assessments: allAss.map((a) => ({
+          id: a.id,
+          schoolId: a.schoolId,
+          schoolYearId: a.schoolYearId,
+          status: a.status,
+          calculatedAverage: a.calculatedAverage,
+          submittedAt: a.submittedAt,
+          submittedByName: a.submittedByName,
+          globalRemarks: a.globalRemarks,
+        })),
+        responses: allResponses,
+        scope: {
+          role: req.user!.role as 'regional' | 'division',
+          divisionId: targetDivisionId,
+          divisionName: targetDivisionName,
+        },
+        exporter: {
+          fullName: req.user!.fullName,
+          username: req.user!.username,
+          role: req.user!.role,
+        },
       };
-    });
 
-    // Populate school rows
-    for (const s of scopedSchools) {
-      const ass = assMap.get(s.schoolDbId);
-      const st = ass ? ass.status : 'Not started';
-      const overallAvg = ass ? parseFloat(ass.calculatedAverage) : 0;
+      // 8. Generate Excel Report safely to a temporary file
+      const { tempFilePath, filename, cleanup } = await exportConsolidatedExcelReport(exportData);
+      cleanupHandler = cleanup;
 
-      let answered = 0;
-      if (ass) {
-        for (const ind of indicators) {
-          const r = respMap.get(`${ass.id}_${ind.id}`);
-          if (r && r > 0) answered++;
-        }
-      }
-
-      let interpretation = 'Not assessed';
-      if (overallAvg > 0) {
-        if (overallAvg < 1.5) interpretation = form.ratingLabel1;
-        else if (overallAvg < 2.5) interpretation = form.ratingLabel2;
-        else if (overallAvg < 3.5) interpretation = form.ratingLabel3;
-        else interpretation = form.ratingLabel4;
-      }
-
-      const rowValues: any[] = [
-        s.schoolId,
-        s.schoolName,
-        s.divisionName,
-        s.district,
-        s.classification,
-        s.schoolHead,
-        st,
-        answered,
-        indicators.length,
-        overallAvg > 0 ? overallAvg.toFixed(2) : '0.00',
-        interpretation,
-        ass?.submittedAt ? ass.submittedAt.toISOString().split('T')[0] : 'N/A',
-        ass?.submittedByName || 'N/A',
-      ];
-
-      // Add section averages
-      for (const sec of sections) {
-        const secInds = indicators.filter((i) => i.sectionId === sec.id);
-        if (!ass || secInds.length === 0) {
-          rowValues.push('0.00');
+      // 9. Send file to client and clean up
+      res.download(tempFilePath, filename, async (downloadErr) => {
+        if (downloadErr) {
+          console.error('[ExcelExportDownloadError]', downloadErr);
+          await logAudit(
+            req,
+            'EXCEL_EXPORT_FAIL',
+            'export',
+            null,
+            `SY: ${syName}, Download failed: ${downloadErr.message}`
+          );
         } else {
-          let secSum = 0;
-          let secAns = 0;
-          for (const si of secInds) {
-            const r = respMap.get(`${ass.id}_${si.id}`);
-            if (r && r > 0) {
-              secSum += r;
-              secAns++;
-            }
-          }
-          rowValues.push(secAns > 0 ? (secSum / secAns).toFixed(2) : '0.00');
+          await logAudit(
+            req,
+            'EXCEL_EXPORT_SUCCESS',
+            'export',
+            null,
+            `SY: ${syName}, Scope: ${targetDivisionName || 'Regional'}, Schools: ${scopedSchools.length}`
+          );
         }
-      }
 
-      const addedRow = wsConsolidated.addRow(rowValues);
-      addedRow.eachCell((cell) => {
-        cell.border = {
-          top: { style: 'thin', color: { argb: 'FFE0E0E0' } },
-          left: { style: 'thin', color: { argb: 'FFE0E0E0' } },
-          bottom: { style: 'thin', color: { argb: 'FFE0E0E0' } },
-          right: { style: 'thin', color: { argb: 'FFE0E0E0' } },
-        };
-      });
-    }
-
-    // Auto-fit columns
-    wsConsolidated.columns.forEach((col) => {
-      let maxLen = 12;
-      col.eachCell?.({ includeEmpty: true }, (cell) => {
-        const len = cell.value ? String(cell.value).length : 0;
-        if (len > maxLen) maxLen = Math.min(len, 40);
-      });
-      col.width = maxLen + 3;
-    });
-
-    // ==========================================
-    // SHEET 2: Indicator Summary
-    // ==========================================
-    const wsIndicators = workbook.addWorksheet('Indicator Summary');
-    const indHeaders = [
-      'Section / Dimension',
-      'Indicator Code',
-      'Indicator Description',
-      `${form.ratingLabel1} (Count)`,
-      `${form.ratingLabel2} (Count)`,
-      `${form.ratingLabel3} (Count)`,
-      `${form.ratingLabel4} (Count)`,
-      'Total Answered',
-      'Mean Rating',
-    ];
-    wsIndicators.addRow(indHeaders);
-    const headerRow2 = wsIndicators.getRow(1);
-    headerRow2.height = 28;
-    headerRow2.eachCell((cell) => {
-      cell.fill = headerFill;
-      cell.font = headerFont;
-      cell.alignment = { vertical: 'middle', horizontal: 'center' };
-      cell.border = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
-    });
-
-    for (const ind of indicators) {
-      const sec = sections.find((s) => s.id === ind.sectionId);
-      let count1 = 0;
-      let count2 = 0;
-      let count3 = 0;
-      let count4 = 0;
-      let sumRating = 0;
-      let ratedTotal = 0;
-
-      for (const s of scopedSchools) {
-        const ass = assMap.get(s.schoolDbId);
-        if (ass) {
-          const r = respMap.get(`${ass.id}_${ind.id}`);
-          if (r === 1) count1++;
-          else if (r === 2) count2++;
-          else if (r === 3) count3++;
-          else if (r === 4) count4++;
-
-          if (r && r > 0) {
-            sumRating += r;
-            ratedTotal++;
-          }
+        // Clean up temporary file immediately after transfer
+        if (cleanupHandler) {
+          await cleanupHandler();
+          cleanupHandler = null;
         }
+      });
+    } catch (err: any) {
+      console.error('[ExcelExportInternalError]', err);
+
+      // Clean up temp file if error occurred before download completed
+      if (cleanupHandler) {
+        try {
+          await cleanupHandler();
+        } catch {}
       }
 
-      const meanRating = ratedTotal > 0 ? (sumRating / ratedTotal).toFixed(2) : '0.00';
+      await logAudit(
+        req,
+        'EXCEL_EXPORT_ERROR',
+        'export',
+        null,
+        `Internal error: ${err?.message || 'Unknown'}`
+      );
 
-      const row = wsIndicators.addRow([
-        sec?.title || 'Section',
-        ind.code,
-        ind.content,
-        count1,
-        count2,
-        count3,
-        count4,
-        ratedTotal,
-        meanRating,
-      ]);
-
-      row.eachCell((cell) => {
-        cell.border = {
-          top: { style: 'thin', color: { argb: 'FFE0E0E0' } },
-          left: { style: 'thin', color: { argb: 'FFE0E0E0' } },
-          bottom: { style: 'thin', color: { argb: 'FFE0E0E0' } },
-          right: { style: 'thin', color: { argb: 'FFE0E0E0' } },
-        };
+      return res.status(500).json({
+        error: 'Failed to generate Excel report due to an internal server error. Please try again later.',
       });
     }
-
-    wsIndicators.columns.forEach((col) => {
-      let maxLen = 14;
-      col.eachCell?.({ includeEmpty: true }, (cell) => {
-        const len = cell.value ? String(cell.value).length : 0;
-        if (len > maxLen) maxLen = Math.min(len, 45);
-      });
-      col.width = maxLen + 3;
-    });
-
-    // ==========================================
-    // SHEET 3: Export Information
-    // ==========================================
-    const wsInfo = workbook.addWorksheet('Export Information');
-    wsInfo.addRow(['Project SBM Online - Consolidated Data Export Manifest']);
-    wsInfo.getRow(1).font = { name: 'Arial', size: 14, bold: true, color: { argb: 'FF0038A8' } };
-    wsInfo.addRow([]);
-
-    const infoData = [
-      ['Generated On', new Date().toLocaleString()],
-      ['Generated By', req.user!.fullName],
-      ['User Role', req.user!.role.toUpperCase()],
-      ['User Account', req.user!.username],
-      ['School Year', syName],
-      ['Division Scope', targetDivisionId ? `Division ID #${targetDivisionId}` : 'ALL REGIONAL DIVISIONS (Full Regional Scope)'],
-      ['Total Schools in Scope', scopedSchools.length],
-      ['Submitted Assessments', scopedSchools.filter((s) => assMap.get(s.schoolDbId)?.status === 'Submitted').length],
-      ['Draft Assessments', scopedSchools.filter((s) => assMap.get(s.schoolDbId)?.status === 'Draft').length],
-      ['Not Started Assessments', scopedSchools.filter((s) => !assMap.get(s.schoolDbId) || assMap.get(s.schoolDbId)?.status === 'Not started').length],
-      ['Regional Authority', 'Department of Education - Regional Office VIII (Eastern Visayas)'],
-    ];
-
-    for (const [k, v] of infoData) {
-      const row = wsInfo.addRow([k, v]);
-      row.getCell(1).font = { bold: true };
-    }
-    wsInfo.getColumn(1).width = 28;
-    wsInfo.getColumn(2).width = 60;
-
-    // ==========================================
-    // SHEET 4: Form Snapshot
-    // ==========================================
-    const wsSnapshot = workbook.addWorksheet('Form Snapshot');
-    wsSnapshot.addRow(['Assessment Form Snapshot for School Year: ' + syName]);
-    wsSnapshot.getRow(1).font = { name: 'Arial', size: 14, bold: true, color: { argb: 'FF0038A8' } };
-    wsSnapshot.addRow([]);
-
-    wsSnapshot.addRow(['Form Title', form.title]);
-    wsSnapshot.addRow(['Form Instructions', form.instructions]);
-    wsSnapshot.addRow(['Form Status', form.status.toUpperCase()]);
-    wsSnapshot.addRow(['Rating Level 1', form.ratingLabel1]);
-    wsSnapshot.addRow(['Rating Level 2', form.ratingLabel2]);
-    wsSnapshot.addRow(['Rating Level 3', form.ratingLabel3]);
-    wsSnapshot.addRow(['Rating Level 4', form.ratingLabel4]);
-    wsSnapshot.addRow(['Allow Edit After Submit', form.allowEditAfterSubmission ? 'YES' : 'NO']);
-    wsSnapshot.addRow(['Require All Indicators', form.requireAllIndicators ? 'YES' : 'NO']);
-    wsSnapshot.addRow(['Require Global Remarks', form.requireGlobalRemarks ? 'YES' : 'NO']);
-    wsSnapshot.addRow(['Require Indicator Remarks', form.requireIndicatorRemarks ? 'YES' : 'NO']);
-    wsSnapshot.addRow(['Total Sections/Dimensions', sections.length]);
-    wsSnapshot.addRow(['Total Active Indicators', indicators.length]);
-    wsSnapshot.addRow([]);
-
-    wsSnapshot.addRow(['Indicator Item Hierarchy:']);
-    wsSnapshot.getRow(wsSnapshot.rowCount).font = { bold: true, size: 12 };
-
-    for (const sec of sections) {
-      wsSnapshot.addRow([`[Dimension ${sec.orderIndex}] ${sec.title}`]);
-      wsSnapshot.getRow(wsSnapshot.rowCount).font = { bold: true, color: { argb: 'FF0038A8' } };
-      const secInds = indicators.filter((i) => i.sectionId === sec.id);
-      for (const ind of secInds) {
-        wsSnapshot.addRow(['', ind.code, ind.content]);
-      }
-    }
-
-    wsSnapshot.getColumn(1).width = 24;
-    wsSnapshot.getColumn(2).width = 16;
-    wsSnapshot.getColumn(3).width = 75;
-
-    // 6. Write Buffer & Send
-    const buffer = await workbook.xlsx.writeBuffer();
-
-    await logAudit(
-      req,
-      'EXCEL_EXPORT',
-      'export',
-      null,
-      `SY: ${syName}, Schools: ${scopedSchools.length}`
-    );
-
-    const filename = `SBM_Online_Report_${syName.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}.xlsx`;
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    return res.send(Buffer.from(buffer));
-  } catch (err: any) {
-    console.error('Excel export error:', err);
-    return res.status(500).json({ error: 'Failed to generate Excel report.' });
   }
-});
+);
 
 export default router;

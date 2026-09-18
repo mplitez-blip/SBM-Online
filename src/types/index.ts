@@ -6,15 +6,19 @@ export interface UserProfile {
   email: string | null;
   role: UserRole;
   fullName: string;
+  logo?: string | null;
   divisionId: number | null;
   divisionName?: string | null;
   divisionCode?: string | null;
+  divisionLogo?: string | null;
   schoolId: number | null;
   schoolDepedId?: string | null;
   schoolName?: string | null;
   schoolDistrict?: string | null;
   schoolClassification?: string | null;
   schoolHead?: string | null;
+  schoolLogo?: string | null;
+  regionLogo?: string | null;
   isActive: boolean;
 }
 
@@ -37,6 +41,11 @@ export interface DivisionItem {
   id: number;
   divisionCode: string;
   divisionName: string;
+  logo?: string | null;
+  adminName?: string | null;
+  username?: string | null;
+  userId?: number | null;
+  isActive?: boolean;
   schoolCount?: number;
   submittedCount?: number;
   draftCount?: number;
@@ -132,6 +141,7 @@ export interface SystemCustomizationData {
   siteTitle: string;
   regionTitle: string;
   navbarLogo: string | null;
+  regionLogo?: string | null;
   favicon: string | null;
   baseFontSize: number;
   primaryColor: string;

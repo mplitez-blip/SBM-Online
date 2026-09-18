@@ -6,6 +6,7 @@ import authRoutes from './src/server/routes/authRoutes.ts';
 import schoolYearRoutes from './src/server/routes/schoolYearRoutes.ts';
 import formBuilderRoutes from './src/server/routes/formBuilderRoutes.ts';
 import schoolRoutes from './src/server/routes/schoolRoutes.ts';
+import divisionRoutes from './src/server/routes/divisionRoutes.ts';
 import assessmentRoutes from './src/server/routes/assessmentRoutes.ts';
 import monitoringRoutes from './src/server/routes/monitoringRoutes.ts';
 import customizationRoutes from './src/server/routes/customizationRoutes.ts';
@@ -41,11 +42,24 @@ async function startServer() {
   app.use('/api/school-years', schoolYearRoutes);
   app.use('/api/forms', formBuilderRoutes);
   app.use('/api/form-builder', formBuilderRoutes);
+  app.use('/api/divisions', divisionRoutes);
   app.use('/api', schoolRoutes);
   app.use('/api/assessments', assessmentRoutes);
   app.use('/api/monitoring', monitoringRoutes);
   app.use('/api/customization', customizationRoutes);
   app.use('/api/export', exportRoutes);
+
+  // Secure static uploads directory
+  const uploadsDir = path.join(process.cwd(), 'public', 'uploads');
+  app.use('/uploads', (req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Content-Disposition', 'inline');
+    next();
+  }, express.static(uploadsDir, {
+    dotfiles: 'ignore',
+    fallthrough: false,
+    maxAge: '1d',
+  }));
 
   // Error handling middleware for API
   app.use('/api', (err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {

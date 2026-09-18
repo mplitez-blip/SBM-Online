@@ -87,6 +87,19 @@ export function invalidateSession(sessionId: string): void {
   }
 }
 
+/**
+ * Invalidate all active sessions for a specific user (e.g. password change, deactivation).
+ */
+export function invalidateUserSessions(userId: number): void {
+  const previousSessions = userActiveSessions.get(userId);
+  if (previousSessions) {
+    for (const oldSid of previousSessions) {
+      activeSessions.delete(oldSid);
+    }
+    userActiveSessions.delete(userId);
+  }
+}
+
 // Generate JWT token with embedded unique sessionId
 export function generateToken(user: Omit<AuthenticatedUser, 'sessionId'>, sessionId: string): string {
   return jwt.sign(

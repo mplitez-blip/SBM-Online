@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext.tsx';
+import { ExportConsolidatedModal } from '../common/ExportConsolidatedModal.tsx';
 
 interface DivisionDashboardProps {
   onNavigate: (view: string, filterParams?: any) => void;
@@ -9,6 +10,7 @@ export const DivisionDashboard: React.FC<DivisionDashboardProps> = ({ onNavigate
   const { user, apiFetch, activeSchoolYear } = useAuth();
   const [stats, setStats] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [showExportModal, setShowExportModal] = useState<boolean>(false);
 
   useEffect(() => {
     loadDivisionStats();
@@ -51,8 +53,14 @@ export const DivisionDashboard: React.FC<DivisionDashboardProps> = ({ onNavigate
       {/* Division Banner */}
       <div className="d-flex flex-wrap justify-content-between align-items-center mb-4 pb-2 border-bottom">
         <div>
-          <div className="badge bg-primary text-uppercase px-2 py-1 mb-1">
-            Schools Division Office (SDO)
+          <div className="d-flex align-items-center gap-2 mb-1">
+            <span className="badge bg-primary text-uppercase px-2 py-1">
+              Schools Division Office (SDO)
+            </span>
+            <span className="badge bg-success px-2 py-1">
+              <i className="bi bi-calendar-check me-1"></i>
+              Active Year: SY {stats?.activeSchoolYear?.name || activeSchoolYear?.name || 'Active'}
+            </span>
           </div>
           <h1 className="h3 fw-bold text-dark mb-0">
             Division of {user?.divisionName || 'Assigned Division'}
@@ -69,23 +77,23 @@ export const DivisionDashboard: React.FC<DivisionDashboardProps> = ({ onNavigate
           >
             <i className="bi bi-arrow-clockwise"></i> Refresh
           </button>
-          <a
-            href={`/api/export/excel?divisionId=${user?.divisionId}`}
+          <button
             className="btn btn-success btn-sm d-flex align-items-center gap-1 shadow-sm"
+            onClick={() => setShowExportModal(true)}
           >
             <i className="bi bi-file-earmark-excel"></i> Export Division Excel
-          </a>
+          </button>
         </div>
       </div>
 
-      {/* KPI Stats */}
+      {/* Division Dashboard KPIs */}
       <div className="row g-3 mb-4">
         {/* Schools in Scope */}
         <div className="col-12 col-sm-6 col-md-3">
           <div className="card h-100 border-0 shadow-sm rounded-3">
             <div className="card-body p-3">
               <div className="d-flex align-items-center justify-content-between mb-2">
-                <span className="text-muted small fw-semibold">Assigned Schools</span>
+                <span className="text-muted small fw-semibold">Schools in Scope</span>
                 <div className="bg-primary bg-opacity-10 text-primary rounded p-2">
                   <i className="bi bi-buildings-fill fs-5"></i>
                 </div>
@@ -101,12 +109,12 @@ export const DivisionDashboard: React.FC<DivisionDashboardProps> = ({ onNavigate
           <div className="card h-100 border-0 shadow-sm rounded-3 border-start border-success border-4">
             <div className="card-body p-3">
               <div className="d-flex align-items-center justify-content-between mb-2">
-                <span className="text-muted small fw-semibold">Submitted Assessments</span>
+                <span className="text-muted small fw-semibold">Submitted</span>
                 <div className="bg-success bg-opacity-10 text-success rounded p-2">
                   <i className="bi bi-check-circle-fill fs-5"></i>
                 </div>
               </div>
-              <h2 className="display-6 fw-bold mb-0 text-success">{stats?.submittedCount || 0}</h2>
+              <h2 className="display-6 fw-bold mb-0 text-success">{stats?.submitted ?? stats?.submittedCount ?? 0}</h2>
               <div className="text-success small mt-1 fw-semibold">
                 {stats?.completionPercentage || 0}% Completion Rate
               </div>
@@ -114,28 +122,28 @@ export const DivisionDashboard: React.FC<DivisionDashboardProps> = ({ onNavigate
           </div>
         </div>
 
-        {/* Drafts */}
+        {/* Draft */}
         <div className="col-12 col-sm-6 col-md-3">
           <div className="card h-100 border-0 shadow-sm rounded-3">
             <div className="card-body p-3">
               <div className="d-flex align-items-center justify-content-between mb-2">
-                <span className="text-muted small fw-semibold">In Draft / Progress</span>
+                <span className="text-muted small fw-semibold">Draft</span>
                 <div className="bg-warning bg-opacity-10 text-warning rounded p-2">
                   <i className="bi bi-pencil-square fs-5"></i>
                 </div>
               </div>
-              <h2 className="display-6 fw-bold mb-0 text-warning">{stats?.draftCount || 0}</h2>
+              <h2 className="display-6 fw-bold mb-0 text-warning">{stats?.draft ?? stats?.draftCount ?? 0}</h2>
               <div className="text-muted small mt-1">Pending submission</div>
             </div>
           </div>
         </div>
 
-        {/* Division Average SBM */}
+        {/* Average rating */}
         <div className="col-12 col-sm-6 col-md-3">
           <div className="card h-100 border-0 shadow-sm rounded-3 bg-primary text-white">
             <div className="card-body p-3">
               <div className="d-flex align-items-center justify-content-between mb-2">
-                <span className="text-white-75 small fw-semibold">Division SBM Mean</span>
+                <span className="text-white-75 small fw-semibold">Average rating</span>
                 <div className="bg-white bg-opacity-20 text-white rounded p-2">
                   <i className="bi bi-award-fill fs-5"></i>
                 </div>
@@ -203,6 +211,13 @@ export const DivisionDashboard: React.FC<DivisionDashboardProps> = ({ onNavigate
           </div>
         </div>
       </div>
+
+      <ExportConsolidatedModal
+        isOpen={showExportModal}
+        onClose={() => setShowExportModal(false)}
+        defaultSchoolYearId={activeSchoolYear?.id}
+        defaultDivisionId={user?.divisionId ?? undefined}
+      />
     </div>
   );
 };

@@ -1,10 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext.tsx';
 
-export const FormBuilder: React.FC = () => {
+interface FormBuilderProps {
+  initialSchoolYearId?: number | string;
+}
+
+export const FormBuilder: React.FC<FormBuilderProps> = ({ initialSchoolYearId }) => {
   const { apiFetch, activeSchoolYear } = useAuth();
   const [schoolYears, setSchoolYears] = useState<any[]>([]);
-  const [selectedSyId, setSelectedSyId] = useState<number | string>('');
+  const [selectedSyId, setSelectedSyId] = useState<number | string>(initialSchoolYearId || '');
   const [formData, setFormData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -42,15 +46,27 @@ export const FormBuilder: React.FC = () => {
     loadSchoolYears();
   }, []);
 
+  useEffect(() => {
+    if (initialSchoolYearId) {
+      setSelectedSyId(initialSchoolYearId);
+    }
+  }, [initialSchoolYearId]);
+
   const loadSchoolYears = async () => {
     try {
       const res = await apiFetch('/api/school-years');
       if (res.ok) {
         const list = await res.json();
         setSchoolYears(list);
-        const active = list.find((s: any) => s.isActive);
-        if (active) setSelectedSyId(active.id);
-        else if (list.length > 0) setSelectedSyId(list[0].id);
+        if (initialSchoolYearId && list.some((s: any) => String(s.id) === String(initialSchoolYearId))) {
+          setSelectedSyId(initialSchoolYearId);
+        } else if (selectedSyId && list.some((s: any) => String(s.id) === String(selectedSyId))) {
+          // preserve existing selection
+        } else {
+          const active = list.find((s: any) => s.isActive);
+          if (active) setSelectedSyId(active.id);
+          else if (list.length > 0) setSelectedSyId(list[0].id);
+        }
       }
     } catch (err) {
       console.error('Failed to load school years:', err);

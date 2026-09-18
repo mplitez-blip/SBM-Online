@@ -1,52 +1,9 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext.tsx';
-
-// Helper to render markdown bold and italic safely without accepting raw HTML
-function renderMarkdownText(text: string) {
-  if (!text) return null;
-
-  // Split by line breaks
-  const lines = text.split('\n');
-
-  return lines.map((line, lIdx) => {
-    // Escape any HTML characters first
-    const safeLine = line.replace(/</g, '&lt;').replace(/>/g, '&gt;');
-
-    // Parse **bold** and *italic*
-    const tokens: React.ReactNode[] = [];
-    let remaining = safeLine;
-    let key = 0;
-
-    while (remaining.length > 0) {
-      const boldMatch = remaining.match(/\*\*(.*?)\*\*/);
-      const italicMatch = remaining.match(/\*(.*?)\*/);
-
-      if (boldMatch && (!italicMatch || boldMatch.index! <= italicMatch.index!)) {
-        const pre = remaining.substring(0, boldMatch.index);
-        if (pre) tokens.push(pre);
-        tokens.push(<strong key={key++} className="fw-bold">{boldMatch[1]}</strong>);
-        remaining = remaining.substring(boldMatch.index! + boldMatch[0].length);
-      } else if (italicMatch) {
-        const pre = remaining.substring(0, italicMatch.index);
-        if (pre) tokens.push(pre);
-        tokens.push(<em key={key++} className="fst-italic">{italicMatch[1]}</em>);
-        remaining = remaining.substring(italicMatch.index! + italicMatch[0].length);
-      } else {
-        tokens.push(remaining);
-        break;
-      }
-    }
-
-    return (
-      <div key={lIdx} className="mb-1">
-        {tokens}
-      </div>
-    );
-  });
-}
+import { SafeFormattedText } from './SafeFormattedText.tsx';
 
 export const Footer: React.FC<{ isLoginPage?: boolean }> = ({ isLoginPage = false }) => {
-  const { user, activeSchoolYear, footerConfig } = useAuth();
+  const { user, activeSchoolYear, footerConfig, logout } = useAuth();
   const [showPrivacyModal, setShowPrivacyModal] = useState(false);
   const [showTermsModal, setShowTermsModal] = useState(false);
   const [showManualModal, setShowManualModal] = useState(false);
@@ -113,6 +70,16 @@ Government Center, Candahug, Palo, Leyte 6501
                     {activeSchoolYear ? activeSchoolYear.name : 'No Active SY'}
                   </span>
                 </div>
+                <div className="vr bg-secondary d-none d-md-block"></div>
+                <button
+                  id="footer-logout-btn"
+                  className="btn btn-outline-danger btn-sm d-flex align-items-center gap-1 py-1 px-2"
+                  onClick={logout}
+                  title="Logout of current session"
+                >
+                  <i className="bi bi-box-arrow-right"></i>
+                  <span>Logout</span>
+                </button>
               </div>
             </div>
           </div>
@@ -124,13 +91,16 @@ Government Center, Candahug, Palo, Leyte 6501
         <div className="row g-4 align-items-center">
           {/* Logos Column */}
           <div className="col-12 col-md-4">
-            <div className="d-flex flex-wrap align-items-center gap-3">
+            <div className="d-flex flex-wrap align-items-center gap-3 overflow-hidden">
               {footerConfig?.firstWideLogo ? (
-                <img
-                  src={footerConfig.firstWideLogo}
-                  alt="RO8 Logo"
-                  style={{ maxHeight: '55px', maxWidth: '160px', objectFit: 'contain' }}
-                />
+                <div className="overflow-hidden d-flex align-items-center rounded bg-white p-1">
+                  <img
+                    src={footerConfig.firstWideLogo}
+                    alt="First Wide Logo"
+                    className="img-fluid"
+                    style={{ maxHeight: '55px', maxWidth: '200px', objectFit: 'contain' }}
+                  />
+                </div>
               ) : (
                 <div
                   className="bg-primary text-white d-flex align-items-center justify-content-center rounded p-2 fw-bold text-center"
@@ -141,11 +111,14 @@ Government Center, Candahug, Palo, Leyte 6501
               )}
 
               {footerConfig?.logo2 ? (
-                <img
-                  src={footerConfig.logo2}
-                  alt="Logo 2"
-                  style={{ maxHeight: '50px', maxWidth: '100px', objectFit: 'contain' }}
-                />
+                <div className="overflow-hidden d-flex align-items-center rounded bg-white p-1">
+                  <img
+                    src={footerConfig.logo2}
+                    alt="Logo 2"
+                    className="img-fluid"
+                    style={{ maxHeight: '50px', maxWidth: '100px', objectFit: 'contain' }}
+                  />
+                </div>
               ) : (
                 <div
                   className="bg-secondary text-white d-flex align-items-center justify-content-center rounded p-1 small text-center"
@@ -156,11 +129,14 @@ Government Center, Candahug, Palo, Leyte 6501
               )}
 
               {footerConfig?.logo3 ? (
-                <img
-                  src={footerConfig.logo3}
-                  alt="Logo 3"
-                  style={{ maxHeight: '50px', maxWidth: '100px', objectFit: 'contain' }}
-                />
+                <div className="overflow-hidden d-flex align-items-center rounded bg-white p-1">
+                  <img
+                    src={footerConfig.logo3}
+                    alt="Logo 3"
+                    className="img-fluid"
+                    style={{ maxHeight: '50px', maxWidth: '100px', objectFit: 'contain' }}
+                  />
+                </div>
               ) : (
                 <div
                   className="bg-danger text-white d-flex align-items-center justify-content-center rounded p-1 small text-center"
@@ -174,7 +150,7 @@ Government Center, Candahug, Palo, Leyte 6501
 
           {/* Center Address & Custom Text */}
           <div className="col-12 col-md-5 text-light small">
-            {renderMarkdownText(footerText)}
+            <SafeFormattedText text={footerText} />
             <div className="mt-2 text-secondary">
               <i className="bi bi-telephone me-1 text-primary"></i> {telephone} &nbsp;|&nbsp;
               <i className="bi bi-envelope me-1 text-danger"></i> {supportEmail}

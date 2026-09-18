@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext.tsx';
 import { Footer } from '../common/Footer.tsx';
+import { SafeFormattedText } from '../common/SafeFormattedText.tsx';
 
 export const LoginPage: React.FC = () => {
   const { login, loginConfig, systemConfig } = useAuth();
-  const [accountType, setAccountType] = useState<'regional' | 'division' | 'school'>('regional');
+  // Select School by default when the page first loads; preserved on validation failure
+  const [accountType, setAccountType] = useState<'regional' | 'division' | 'school'>('school');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -62,7 +64,9 @@ export const LoginPage: React.FC = () => {
             <div
               className="col-lg-7 p-4 p-md-5 text-white d-flex flex-column justify-content-between position-relative"
               style={{
-                background: `linear-gradient(135deg, ${primaryColor} 0%, ${gradientColor} 100%)`,
+                background: loginConfig?.brandPanelBg
+                  ? `linear-gradient(135deg, ${primaryColor}ee 0%, ${gradientColor}ee 100%), url(${loginConfig.brandPanelBg}) center/cover no-repeat`
+                  : `linear-gradient(135deg, ${primaryColor} 0%, ${gradientColor} 100%)`,
                 minHeight: '480px',
               }}
             >
@@ -78,12 +82,14 @@ export const LoginPage: React.FC = () => {
               <div className="position-relative z-1">
                 <div className="d-flex align-items-center gap-3 mb-4">
                   {loginConfig?.loginLogo ? (
-                    <img
-                      src={loginConfig.loginLogo}
-                      alt="Portal Logo"
-                      className="img-fluid rounded bg-white p-1"
-                      style={{ maxHeight: '60px', maxWidth: '140px', objectFit: 'contain' }}
-                    />
+                    <div className="overflow-hidden rounded bg-white p-1 d-flex align-items-center">
+                      <img
+                        src={loginConfig.loginLogo}
+                        alt="Portal Logo"
+                        className="img-fluid"
+                        style={{ maxHeight: '60px', maxWidth: '140px', objectFit: 'contain' }}
+                      />
+                    </div>
                   ) : (
                     <div
                       className="rounded bg-white text-primary d-flex align-items-center justify-content-center shadow-sm"
@@ -104,9 +110,9 @@ export const LoginPage: React.FC = () => {
                   {eyebrow}
                 </div>
                 <h1 className="display-6 fw-bold mb-3 text-white">{heading}</h1>
-                <p className="lead fs-6 text-white-75 mb-4" style={{ maxWidth: '540px' }}>
-                  {description}
-                </p>
+                <div className="lead fs-6 text-white-75 mb-4" style={{ maxWidth: '540px' }}>
+                  <SafeFormattedText text={description} />
+                </div>
 
                 {/* Public announcement if present */}
                 {announcement && (
@@ -117,7 +123,9 @@ export const LoginPage: React.FC = () => {
                     <div className="d-flex align-items-center gap-2 text-warning fw-semibold small mb-1">
                       <i className="bi bi-megaphone-fill"></i> Public Advisory / Announcement
                     </div>
-                    <div className="small text-white">{announcement}</div>
+                    <div className="small text-white">
+                      <SafeFormattedText text={announcement} />
+                    </div>
                   </div>
                 )}
               </div>

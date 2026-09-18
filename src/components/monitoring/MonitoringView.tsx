@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext.tsx';
+import { ExportConsolidatedModal } from '../common/ExportConsolidatedModal.tsx';
 
 interface MonitoringViewProps {
   initialDivisionId?: number;
@@ -8,37 +9,107 @@ interface MonitoringViewProps {
 
 export const MonitoringView: React.FC<MonitoringViewProps> = ({ initialDivisionId, onInspectSchool }) => {
   const { user, apiFetch, activeSchoolYear } = useAuth();
+  const [showExportModal, setShowExportModal] = useState<boolean>(false);
+
+  // Read URL query params on mount for state preservation
+  const urlParams = new URLSearchParams(window.location.search);
+  const paramSy = urlParams.get('schoolYearId') || urlParams.get('sy') || '';
+  const paramDiv =
+    user?.role === 'division'
+      ? String(user.divisionId)
+      : urlParams.get('divisionId') || (initialDivisionId ? String(initialDivisionId) : '');
+  const paramDist = urlParams.get('district') || '';
+  const paramCls = urlParams.get('classification') || '';
+  const paramStat = urlParams.get('status') || '';
+  const paramSearch = urlParams.get('search') || '';
+  const paramSortBy = urlParams.get('sortBy') || 'schoolName';
+  const paramSortDir = (urlParams.get('sortDir') as 'asc' | 'desc') || 'asc';
+  const paramPage = parseInt(urlParams.get('page') || '1', 10) || 1;
+  const paramPageSize = parseInt(urlParams.get('pageSize') || '15', 10) || 15;
 
   // Filter states
   const [schoolYears, setSchoolYears] = useState<any[]>([]);
   const [divisions, setDivisions] = useState<any[]>([]);
+  const [districts, setDistricts] = useState<string[]>([]);
   const [classifications, setClassifications] = useState<any[]>([]);
 
-  const [selectedSyId, setSelectedSyId] = useState<number | string>('');
-  const [selectedDivisionId, setSelectedDivisionId] = useState<number | string>(
-    user?.role === 'division' ? user.divisionId! : initialDivisionId || ''
-  );
-  const [selectedDistrict, setSelectedDistrict] = useState<string>('');
-  const [selectedClassification, setSelectedClassification] = useState<string>('');
-  const [selectedStatus, setSelectedStatus] = useState<string>('');
-  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [selectedSyId, setSelectedSyId] = useState<number | string>(paramSy);
+  const [selectedDivisionId, setSelectedDivisionId] = useState<number | string>(paramDiv);
+  const [selectedDistrict, setSelectedDistrict] = useState<string>(paramDist);
+  const [selectedClassification, setSelectedClassification] = useState<string>(paramCls);
+  const [selectedStatus, setSelectedStatus] = useState<string>(paramStat);
+  const [searchQuery, setSearchQuery] = useState<string>(paramSearch);
+  const [searchInput, setSearchInput] = useState<string>(paramSearch);
 
   // Sorting & Pagination
-  const [sortBy, setSortBy] = useState<string>('schoolName');
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
-  const [currentPage, setCurrentPage] = useState<number>(1);
-  const [pageSize, setPageSize] = useState<number>(15);
+  const [sortBy, setSortBy] = useState<string>(paramSortBy);
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>(paramSortDir);
+  const [currentPage, setCurrentPage] = useState<number>(paramPage);
+  const [pageSize, setPageSize] = useState<number>(paramPageSize);
 
-  // Table Data
+  // Table Data & States
   const [data, setData] = useState<any[]>([]);
   const [totalRecords, setTotalRecords] = useState<number>(0);
   const [totalPages, setTotalPages] = useState<number>(1);
   const [activeIndicatorCount, setActiveIndicatorCount] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
 
   // Active view tab (List vs Division Summary for Regional)
   const [activeTab, setActiveTab] = useState<'schools' | 'divisionSummary'>('schools');
   const [divisionSummary, setDivisionSummary] = useState<any>(null);
+
+  // Sync state changes to URL query parameters
+  useEffect(() => {
+    const url = new URL(window.location.href);
+
+    if (selectedSyId) url.searchParams.set('schoolYearId', String(selectedSyId));
+    else url.searchParams.delete('schoolYearId');
+
+    if (user?.role === 'regional' && selectedDivisionId) {
+      url.searchParams.set('divisionId', String(selectedDivisionId));
+    } else {
+      url.searchParams.delete('divisionId');
+    }
+
+    if (selectedDistrict) url.searchParams.set('district', selectedDistrict);
+    else url.searchParams.delete('district');
+
+    if (selectedClassification) url.searchParams.set('classification', selectedClassification);
+    else url.searchParams.delete('classification');
+
+    if (selectedStatus) url.searchParams.set('status', selectedStatus);
+    else url.searchParams.delete('status');
+
+    if (searchQuery) url.searchParams.set('search', searchQuery);
+    else url.searchParams.delete('search');
+
+    if (sortBy && sortBy !== 'schoolName') url.searchParams.set('sortBy', sortBy);
+    else url.searchParams.delete('sortBy');
+
+    if (sortDir && sortDir !== 'asc') url.searchParams.set('sortDir', sortDir);
+    else url.searchParams.delete('sortDir');
+
+    if (currentPage > 1) url.searchParams.set('page', String(currentPage));
+    else url.searchParams.delete('page');
+
+    if (pageSize !== 15) url.searchParams.set('pageSize', String(pageSize));
+    else url.searchParams.delete('pageSize');
+
+    window.history.replaceState(null, '', `${url.pathname}${url.search}`);
+  }, [
+    selectedSyId,
+    selectedDivisionId,
+    selectedDistrict,
+    selectedClassification,
+    selectedStatus,
+    searchQuery,
+    sortBy,
+    sortDir,
+    currentPage,
+    pageSize,
+    user?.role,
+  ]);
 
   // Load dropdown options
   useEffect(() => {
@@ -56,14 +127,34 @@ export const MonitoringView: React.FC<MonitoringViewProps> = ({ initialDivisionI
       if (syRes.ok) {
         const syList = await syRes.json();
         setSchoolYears(syList);
-        const active = syList.find((s: any) => s.isActive);
-        if (active) setSelectedSyId(active.id);
-        else if (syList.length > 0) setSelectedSyId(syList[0].id);
+        if (!selectedSyId) {
+          const active = syList.find((s: any) => s.isActive);
+          if (active) setSelectedSyId(active.id);
+          else if (syList.length > 0) setSelectedSyId(syList[0].id);
+        }
       }
       if (divRes.ok) setDivisions(await divRes.json());
       if (clsRes.ok) setClassifications(await clsRes.json());
     } catch (err) {
       console.error('Failed to load filter dropdowns:', err);
+    }
+  };
+
+  // Load districts whenever division changes
+  useEffect(() => {
+    loadDistricts();
+  }, [selectedDivisionId, user?.role]);
+
+  const loadDistricts = async () => {
+    try {
+      const divParam = selectedDivisionId ? `?divisionId=${selectedDivisionId}` : '';
+      const res = await apiFetch(`/api/monitoring/districts${divParam}`);
+      if (res.ok) {
+        const list = await res.json();
+        setDistricts(list);
+      }
+    } catch (err) {
+      console.error('Failed to load districts:', err);
     }
   };
 
@@ -81,6 +172,7 @@ export const MonitoringView: React.FC<MonitoringViewProps> = ({ initialDivisionI
     selectedDistrict,
     selectedClassification,
     selectedStatus,
+    searchQuery,
     sortBy,
     sortDir,
     currentPage,
@@ -89,6 +181,7 @@ export const MonitoringView: React.FC<MonitoringViewProps> = ({ initialDivisionI
 
   const loadMonitoringData = async () => {
     setLoading(true);
+    setError(null);
     try {
       const params = new URLSearchParams();
       if (selectedSyId) params.append('schoolYearId', String(selectedSyId));
@@ -109,9 +202,13 @@ export const MonitoringView: React.FC<MonitoringViewProps> = ({ initialDivisionI
         setTotalRecords(json.total || 0);
         setTotalPages(json.totalPages || 1);
         setActiveIndicatorCount(json.activeIndicatorCount || 0);
+      } else {
+        const errJson = await res.json().catch(() => ({}));
+        setError(errJson.error || `Failed to fetch data (${res.status})`);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Monitoring load error:', err);
+      setError(err?.message || 'Network connection failed. Please retry.');
     } finally {
       setLoading(false);
     }
@@ -130,8 +227,18 @@ export const MonitoringView: React.FC<MonitoringViewProps> = ({ initialDivisionI
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    setSearchQuery(searchInput.trim());
     setCurrentPage(1);
-    loadMonitoringData();
+  };
+
+  const clearFilters = () => {
+    if (user?.role === 'regional') setSelectedDivisionId('');
+    setSelectedDistrict('');
+    setSelectedClassification('');
+    setSelectedStatus('');
+    setSearchQuery('');
+    setSearchInput('');
+    setCurrentPage(1);
   };
 
   const handleSort = (field: string) => {
@@ -141,6 +248,7 @@ export const MonitoringView: React.FC<MonitoringViewProps> = ({ initialDivisionI
       setSortBy(field);
       setSortDir('asc');
     }
+    setCurrentPage(1);
   };
 
   const getSortIcon = (field: string) => {
@@ -184,12 +292,12 @@ export const MonitoringView: React.FC<MonitoringViewProps> = ({ initialDivisionI
           >
             <i className="bi bi-arrow-clockwise"></i> Refresh Data
           </button>
-          <a
-            href={exportExcelUrl}
+          <button
             className="btn btn-success btn-sm d-flex align-items-center gap-1 shadow-sm"
+            onClick={() => setShowExportModal(true)}
           >
             <i className="bi bi-file-earmark-excel"></i> Export Consolidated Excel (4 Sheets)
-          </a>
+          </button>
         </div>
       </div>
 
@@ -376,16 +484,34 @@ export const MonitoringView: React.FC<MonitoringViewProps> = ({ initialDivisionI
                 {/* District Filter */}
                 <div className="col-12 col-sm-6 col-md-2">
                   <label className="form-label small fw-semibold text-secondary">District</label>
-                  <input
-                    type="text"
-                    className="form-control form-control-sm"
-                    placeholder="Filter district..."
-                    value={selectedDistrict}
-                    onChange={(e) => {
-                      setSelectedDistrict(e.target.value);
-                      setCurrentPage(1);
-                    }}
-                  />
+                  {districts.length > 0 ? (
+                    <select
+                      className="form-select form-select-sm"
+                      value={selectedDistrict}
+                      onChange={(e) => {
+                        setSelectedDistrict(e.target.value);
+                        setCurrentPage(1);
+                      }}
+                    >
+                      <option value="">All Districts ({districts.length})</option>
+                      {districts.map((dst) => (
+                        <option key={dst} value={dst}>
+                          {dst}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      type="text"
+                      className="form-control form-control-sm"
+                      placeholder="Filter district..."
+                      value={selectedDistrict}
+                      onChange={(e) => {
+                        setSelectedDistrict(e.target.value);
+                        setCurrentPage(1);
+                      }}
+                    />
+                  )}
                 </div>
 
                 {/* Classification Filter */}
@@ -435,12 +561,26 @@ export const MonitoringView: React.FC<MonitoringViewProps> = ({ initialDivisionI
                         type="text"
                         className="form-control"
                         placeholder="Search..."
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
+                        value={searchInput}
+                        onChange={(e) => setSearchInput(e.target.value)}
                       />
-                      <button type="submit" className="btn btn-primary">
+                      <button type="submit" className="btn btn-primary" title="Search">
                         <i className="bi bi-search"></i>
                       </button>
+                      {searchQuery && (
+                        <button
+                          type="button"
+                          className="btn btn-outline-secondary"
+                          title="Clear search"
+                          onClick={() => {
+                            setSearchInput('');
+                            setSearchQuery('');
+                            setCurrentPage(1);
+                          }}
+                        >
+                          <i className="bi bi-x"></i>
+                        </button>
+                      )}
                     </div>
                   </form>
                 </div>
@@ -496,20 +636,16 @@ export const MonitoringView: React.FC<MonitoringViewProps> = ({ initialDivisionI
                       <i
                         className="bi bi-x ms-1 cursor-pointer"
                         style={{ cursor: 'pointer' }}
-                        onClick={() => setSearchQuery('')}
+                        onClick={() => {
+                          setSearchInput('');
+                          setSearchQuery('');
+                        }}
                       ></i>
                     </span>
                   )}
                   <button
                     className="btn btn-link btn-sm p-0 text-danger text-decoration-none"
-                    onClick={() => {
-                      if (user?.role === 'regional') setSelectedDivisionId('');
-                      setSelectedDistrict('');
-                      setSelectedClassification('');
-                      setSelectedStatus('');
-                      setSearchQuery('');
-                      setCurrentPage(1);
-                    }}
+                    onClick={clearFilters}
                   >
                     Clear All Filters
                   </button>
@@ -518,6 +654,21 @@ export const MonitoringView: React.FC<MonitoringViewProps> = ({ initialDivisionI
             </div>
           </div>
 
+          {/* Error Alert Banner */}
+          {error && !loading && (
+            <div className="alert alert-danger d-flex align-items-center justify-content-between mb-4 shadow-sm rounded-3">
+              <div className="d-flex align-items-center gap-2">
+                <i className="bi bi-exclamation-triangle-fill fs-5 text-danger"></i>
+                <div>
+                  <strong>Monitoring Data Error:</strong> {error}
+                </div>
+              </div>
+              <button className="btn btn-danger btn-sm" onClick={loadMonitoringData}>
+                <i className="bi bi-arrow-clockwise me-1"></i> Retry
+              </button>
+            </div>
+          )}
+
           {/* Monitoring Table */}
           <div className="card border-0 shadow-sm rounded-3">
             <div className="card-header bg-white py-3 d-flex flex-wrap justify-content-between align-items-center">
@@ -525,8 +676,8 @@ export const MonitoringView: React.FC<MonitoringViewProps> = ({ initialDivisionI
                 <span className="fw-bold text-dark">
                   Showing {data.length} of {totalRecords} schools
                 </span>
-                <span className="text-muted small ms-2">
-                  (Total Active Indicators in Form: {activeIndicatorCount})
+                <span className="badge bg-light text-secondary border ms-2">
+                  Active Indicator Count: {activeIndicatorCount}
                 </span>
               </div>
 
@@ -572,7 +723,7 @@ export const MonitoringView: React.FC<MonitoringViewProps> = ({ initialDivisionI
                       Status {getSortIcon('status')}
                     </th>
                     <th className="text-center" style={{ cursor: 'pointer' }} onClick={() => handleSort('answeredCount')}>
-                      Answered Indicators {getSortIcon('answeredCount')}
+                      Answered Indicators ({activeIndicatorCount} Active) {getSortIcon('answeredCount')}
                     </th>
                     <th className="text-center" style={{ cursor: 'pointer' }} onClick={() => handleSort('averageRating')}>
                       Avg Rating {getSortIcon('averageRating')}
@@ -587,21 +738,40 @@ export const MonitoringView: React.FC<MonitoringViewProps> = ({ initialDivisionI
                   {loading ? (
                     <tr>
                       <td colSpan={10} className="text-center py-5">
-                        <div className="spinner-border text-primary" role="status"></div>
-                        <div className="text-muted small mt-2">Loading schools data...</div>
+                        <div className="spinner-border text-primary" role="status">
+                          <span className="visually-hidden">Loading...</span>
+                        </div>
+                        <div className="text-muted small mt-2 fw-semibold">Loading school submission records...</div>
+                      </td>
+                    </tr>
+                  ) : error ? (
+                    <tr>
+                      <td colSpan={10} className="text-center py-5 text-danger">
+                        <i className="bi bi-exclamation-triangle fs-2 d-block mb-2 text-danger"></i>
+                        <div className="fw-bold mb-1">Failed to load monitoring data</div>
+                        <div className="small text-muted mb-3">{error}</div>
+                        <button className="btn btn-primary btn-sm" onClick={loadMonitoringData}>
+                          <i className="bi bi-arrow-clockwise me-1"></i> Retry
+                        </button>
                       </td>
                     </tr>
                   ) : data.length === 0 ? (
                     <tr>
                       <td colSpan={10} className="text-center py-5 text-muted">
                         <i className="bi bi-inbox fs-2 d-block text-secondary mb-2"></i>
-                        No schools found matching your search or filter criteria.
+                        <div className="h6 fw-bold text-dark mb-1">No Schools Found</div>
+                        <div className="small text-muted mb-3">
+                          No schools matched your search or filter criteria.
+                        </div>
+                        <button className="btn btn-outline-primary btn-sm" onClick={clearFilters}>
+                          <i className="bi bi-x-circle me-1"></i> Clear All Filters
+                        </button>
                       </td>
                     </tr>
                   ) : (
                     data.map((item) => {
                       const isComplete =
-                        item.totalIndicators > 0 && item.answeredCount === item.totalIndicators;
+                        activeIndicatorCount > 0 && item.answeredCount === activeIndicatorCount;
 
                       return (
                         <tr key={item.schoolDbId}>
@@ -632,11 +802,11 @@ export const MonitoringView: React.FC<MonitoringViewProps> = ({ initialDivisionI
                           </td>
                           <td className="text-center">
                             <span className={`fw-semibold ${isComplete ? 'text-success' : 'text-dark'}`}>
-                              {item.answeredCount} / {item.totalIndicators}
+                              {item.answeredCount} / {activeIndicatorCount}
                             </span>
                             <div className="text-muted" style={{ fontSize: '0.7rem' }}>
-                              {item.totalIndicators > 0
-                                ? `${Math.round((item.answeredCount / item.totalIndicators) * 100)}%`
+                              {activeIndicatorCount > 0
+                                ? `${Math.round((item.answeredCount / activeIndicatorCount) * 100)}%`
                                 : '0%'}
                             </div>
                           </td>
@@ -666,29 +836,49 @@ export const MonitoringView: React.FC<MonitoringViewProps> = ({ initialDivisionI
 
             {/* Pagination */}
             {totalPages > 1 && (
-              <div className="card-footer bg-white py-3 d-flex flex-wrap justify-content-between align-items-center">
+              <div className="card-footer bg-white py-3 d-flex flex-wrap justify-content-between align-items-center gap-2">
                 <div className="small text-muted">
                   Page <strong>{currentPage}</strong> of <strong>{totalPages}</strong> (Total {totalRecords} records)
                 </div>
                 <ul className="pagination pagination-sm mb-0">
                   <li className={`page-item ${currentPage === 1 ? 'disabled' : ''}`}>
-                    <button className="page-link" onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}>
-                      Previous
+                    <button className="page-link" onClick={() => setCurrentPage(1)} title="First Page">
+                      &laquo;
                     </button>
                   </li>
-                  {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-                    const pageNum = i + 1;
-                    return (
-                      <li key={pageNum} className={`page-item ${currentPage === pageNum ? 'active' : ''}`}>
-                        <button className="page-link" onClick={() => setCurrentPage(pageNum)}>
-                          {pageNum}
-                        </button>
-                      </li>
-                    );
-                  })}
+                  <li className={`page-item ${currentPage === 1 ? 'disabled' : ''}`}>
+                    <button className="page-link" onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}>
+                      Prev
+                    </button>
+                  </li>
+                  {Array.from({ length: totalPages }, (_, i) => i + 1)
+                    .filter((p) => p === 1 || p === totalPages || Math.abs(p - currentPage) <= 2)
+                    .map((pageNum, idx, arr) => {
+                      const prev = arr[idx - 1];
+                      const showEllipsis = prev && pageNum - prev > 1;
+                      return (
+                        <React.Fragment key={pageNum}>
+                          {showEllipsis && (
+                            <li className="page-item disabled">
+                              <span className="page-link">...</span>
+                            </li>
+                          )}
+                          <li className={`page-item ${currentPage === pageNum ? 'active' : ''}`}>
+                            <button className="page-link" onClick={() => setCurrentPage(pageNum)}>
+                              {pageNum}
+                            </button>
+                          </li>
+                        </React.Fragment>
+                      );
+                    })}
                   <li className={`page-item ${currentPage === totalPages ? 'disabled' : ''}`}>
                     <button className="page-link" onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}>
                       Next
+                    </button>
+                  </li>
+                  <li className={`page-item ${currentPage === totalPages ? 'disabled' : ''}`}>
+                    <button className="page-link" onClick={() => setCurrentPage(totalPages)} title="Last Page">
+                      &raquo;
                     </button>
                   </li>
                 </ul>
@@ -697,6 +887,13 @@ export const MonitoringView: React.FC<MonitoringViewProps> = ({ initialDivisionI
           </div>
         </>
       )}
+
+      <ExportConsolidatedModal
+        isOpen={showExportModal}
+        onClose={() => setShowExportModal(false)}
+        defaultSchoolYearId={selectedSyId}
+        defaultDivisionId={selectedDivisionId}
+      />
     </div>
   );
 };

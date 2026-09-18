@@ -56,20 +56,40 @@ router.get('/active', requireAuth, async (req: AuthenticatedRequest, res: Respon
       }
     }
 
-    // 1. Get active school year
-    const activeSyList = await db.select().from(schoolYears).where(eq(schoolYears.isActive, true));
-    if (activeSyList.length === 0) {
-      return res.status(404).json({ error: 'No active School Year is configured by Regional Office.' });
+    // 1. Get requested or active school year - reject access if none exists
+    let targetSy: any = null;
+    if (req.query.schoolYearId) {
+      const syId = parseInt(String(req.query.schoolYearId), 10);
+      if (!isNaN(syId)) {
+        const found = await db.select().from(schoolYears).where(eq(schoolYears.id, syId));
+        if (found.length > 0) targetSy = found[0];
+      }
     }
-    const activeSy = activeSyList[0];
+    if (!targetSy) {
+      const activeSyList = await db.select().from(schoolYears).where(eq(schoolYears.isActive, true));
+      if (activeSyList.length > 0) targetSy = activeSyList[0];
+    }
+    if (!targetSy) {
+      const allSy = await db.select().from(schoolYears).orderBy(sql`${schoolYears.id} DESC`).limit(1);
+      if (allSy.length > 0) targetSy = allSy[0];
+    }
 
-    // 2. Get published form
-    const formList = await db.select().from(assessmentForms).where(eq(assessmentForms.schoolYearId, activeSy.id));
-    if (formList.length === 0 || formList[0].status !== 'published') {
-      return res.json({
+    if (!targetSy) {
+      return res.status(404).json({
         available: false,
-        message: 'The assessment form for the active School Year is not yet published.',
-        schoolYear: activeSy,
+        error: 'Access rejected: No active School Year is configured by Regional Office.',
+        message: 'No active School Year is configured by Regional Office.',
+      });
+    }
+
+    // 2. Get published form - reject entry if form is unpublished
+    const formList = await db.select().from(assessmentForms).where(eq(assessmentForms.schoolYearId, targetSy.id));
+    if (formList.length === 0 || formList[0].status !== 'published') {
+      return res.status(403).json({
+        available: false,
+        error: `Access rejected: The assessment form for School Year ${targetSy.name} is unpublished.`,
+        message: `The assessment form for School Year ${targetSy.name} is not yet published.`,
+        schoolYear: targetSy,
       });
     }
 
@@ -88,11 +108,11 @@ router.get('/active', requireAuth, async (req: AuthenticatedRequest, res: Respon
       .where(sql`${formIndicators.formId} = ${form.id} AND ${formIndicators.isActive} = true`)
       .orderBy(formIndicators.orderIndex);
 
-    // 4. Get or initialize school assessment
+    // 4. Get or initialize school assessment (prevent duplicates)
     const existingAss = await db
       .select()
       .from(assessments)
-      .where(sql`${assessments.schoolId} = ${targetSchoolId} AND ${assessments.schoolYearId} = ${activeSy.id}`);
+      .where(sql`${assessments.schoolId} = ${targetSchoolId} AND ${assessments.schoolYearId} = ${targetSy.id}`);
 
     let userAssessment = existingAss[0] || null;
     let userResponses: any[] = [];
@@ -126,7 +146,7 @@ router.get('/active', requireAuth, async (req: AuthenticatedRequest, res: Respon
 
     return res.json({
       available: true,
-      schoolYear: activeSy,
+      schoolYear: targetSy,
       form: {
         id: form.id,
         title: form.title,
@@ -168,11 +188,12 @@ router.get('/active', requireAuth, async (req: AuthenticatedRequest, res: Respon
   }
 });
 
-// POST /api/assessments/save-draft - Save draft
+// POST /api/assessments/save-draft - Save draft using transaction
 router.post('/save-draft', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { schoolId, schoolYearId, globalRemarks, responses } = req.body;
 
+    // Prevent access to another School's data
     if (req.user!.role === 'school') {
       if (schoolId && Number(schoolId) !== req.user!.schoolId) {
         return res.status(403).json({ error: "Access denied: A School cannot access another School's assessment." });
@@ -197,27 +218,31 @@ router.post('/save-draft', requireAuth, async (req: AuthenticatedRequest, res: R
 
     // Check school year and form
     const sy = await db.select().from(schoolYears).where(eq(schoolYears.id, Number(schoolYearId)));
-    if (sy.length === 0) return res.status(404).json({ error: 'School Year not found' });
+    if (sy.length === 0) return res.status(404).json({ error: 'School Year not found.' });
     if (sy[0].isClosed) return res.status(400).json({ error: 'This School Year is closed for submissions.' });
 
+    // Reject entry if form is unpublished
     const formRes = await db.select().from(assessmentForms).where(eq(assessmentForms.schoolYearId, Number(schoolYearId)));
-    if (formRes.length === 0) return res.status(400).json({ error: 'Assessment form not found' });
+    if (formRes.length === 0 || formRes[0].status !== 'published') {
+      return res.status(403).json({ error: 'Entry rejected: The assessment form is unpublished.' });
+    }
     const form = formRes[0];
 
-    // Check existing assessment
+    // Lock submitted assessments unless editing is permitted
     const existingAss = await db
       .select()
       .from(assessments)
       .where(sql`${assessments.schoolId} = ${targetSchoolId} AND ${assessments.schoolYearId} = ${Number(schoolYearId)}`);
 
     if (existingAss.length > 0 && existingAss[0].status === 'Submitted' && !form.allowEditAfterSubmission) {
-      return res.status(400).json({ error: 'Assessment is already submitted and locked against modifications.' });
+      return res.status(403).json({ error: 'Assessment is locked: Editing is not permitted after submission.' });
     }
 
-    // Calculate current running average of answered items
+    // Calculate current running average of answered items (ratings 1-4)
     const validRatings = Array.isArray(responses) ? responses.filter((r: any) => r.rating > 0).map((r: any) => Number(r.rating)) : [];
     const avg = validRatings.length > 0 ? (validRatings.reduce((a: number, b: number) => a + b, 0) / validRatings.length).toFixed(2) : '0.00';
 
+    // Use a transaction to save the assessment and responses
     await db.transaction(async (tx) => {
       let assId: number;
       if (existingAss.length === 0) {
@@ -283,11 +308,12 @@ router.post('/save-draft', requireAuth, async (req: AuthenticatedRequest, res: R
   }
 });
 
-// POST /api/assessments/submit - Submit final assessment
+// POST /api/assessments/submit - Submit final assessment with transaction and audit log
 router.post('/submit', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { schoolId, schoolYearId, globalRemarks, responses, submitterName } = req.body;
 
+    // Prevent access to another School's data
     if (req.user!.role === 'school') {
       if (schoolId && Number(schoolId) !== req.user!.schoolId) {
         return res.status(403).json({ error: "Access denied: A School cannot access another School's assessment." });
@@ -312,14 +338,25 @@ router.post('/submit', requireAuth, async (req: AuthenticatedRequest, res: Respo
 
     // 1. Verify school year and form
     const sy = await db.select().from(schoolYears).where(eq(schoolYears.id, Number(schoolYearId)));
-    if (sy.length === 0) return res.status(404).json({ error: 'School Year not found' });
+    if (sy.length === 0) return res.status(404).json({ error: 'School Year not found.' });
     if (sy[0].isClosed) return res.status(400).json({ error: 'This School Year is closed for submissions.' });
 
+    // Reject entry if form is unpublished
     const formRes = await db.select().from(assessmentForms).where(eq(assessmentForms.schoolYearId, Number(schoolYearId)));
     if (formRes.length === 0 || formRes[0].status !== 'published') {
-      return res.status(400).json({ error: 'Assessment form is not published.' });
+      return res.status(403).json({ error: 'Submission rejected: The assessment form is unpublished.' });
     }
     const form = formRes[0];
+
+    // Lock submitted assessments unless editing is permitted
+    const existingAssCheck = await db
+      .select()
+      .from(assessments)
+      .where(sql`${assessments.schoolId} = ${targetSchoolId} AND ${assessments.schoolYearId} = ${Number(schoolYearId)}`);
+
+    if (existingAssCheck.length > 0 && existingAssCheck[0].status === 'Submitted' && !form.allowEditAfterSubmission) {
+      return res.status(403).json({ error: 'Assessment is locked: Re-submission or editing is not permitted.' });
+    }
 
     // 2. Fetch all active indicators for this form
     const activeIndicators = await db
@@ -338,7 +375,7 @@ router.post('/submit', requireAuth, async (req: AuthenticatedRequest, res: Respo
     }
 
     // 3. Validation
-    // Validate required indicators
+    // Require all indicators when configured
     if (form.requireAllIndicators) {
       const unanswered = activeIndicators.filter((ind) => {
         const r = responseMap.get(ind.id);
@@ -348,24 +385,26 @@ router.post('/submit', requireAuth, async (req: AuthenticatedRequest, res: Respo
       if (unanswered.length > 0) {
         return res.status(400).json({
           error: `Submission rejected: All ${activeIndicators.length} active indicators must be rated before submission. (${unanswered.length} unanswered remaining: e.g. ${unanswered.map((u) => u.code).slice(0, 5).join(', ')}).`,
+          unansweredCodes: unanswered.map((u) => u.code),
         });
       }
     }
 
-    // Validate global remarks requirement
+    // Require remarks globally when configured
     if (form.requireGlobalRemarks && (!globalRemarks || !globalRemarks.trim())) {
-      return res.status(400).json({ error: 'Global assessment remarks / recommendations are required for submission.' });
+      return res.status(400).json({ error: 'Submission rejected: Global assessment remarks / recommendations are required for submission.' });
     }
 
-    // Validate per-indicator remarks requirement
+    // Require remarks per indicator when configured
     if (form.requireIndicatorRemarks) {
       const missingRemarks = activeIndicators.filter((ind) => {
         const r = responseMap.get(ind.id);
-        return !r || !r.remarks || r.remarks.length === 0;
+        return !r || !r.remarks || !r.remarks.trim();
       });
       if (missingRemarks.length > 0) {
         return res.status(400).json({
-          error: `Submission rejected: Remarks are required for each indicator (Missing on: ${missingRemarks.map((m) => m.code).slice(0, 5).join(', ')}).`,
+          error: `Submission rejected: Remarks / MOVs are required for each indicator (${missingRemarks.length} missing: e.g. ${missingRemarks.map((m) => m.code).slice(0, 5).join(', ')}).`,
+          missingRemarksCodes: missingRemarks.map((m) => m.code),
         });
       }
     }
@@ -382,7 +421,7 @@ router.post('/submit', requireAuth, async (req: AuthenticatedRequest, res: Respo
     }
     const finalAverage = countRated > 0 ? (totalScore / countRated).toFixed(2) : '0.00';
 
-    // 4. Save assessment and responses transactionally
+    // 4. Save assessment and responses transactionally (prevent duplicate assessments for same school year)
     await db.transaction(async (tx) => {
       const existingAss = await tx
         .select()
@@ -450,7 +489,15 @@ router.post('/submit', requireAuth, async (req: AuthenticatedRequest, res: Respo
       }
     });
 
-    await logAudit(req, 'SUBMIT_ASSESSMENT', 'assessments', targetSchoolId, `Average: ${finalAverage}`);
+    // Write an audit log when submitted
+    await logAudit(
+      req,
+      'SUBMIT_ASSESSMENT',
+      'assessments',
+      targetSchoolId,
+      `School Year: ${sy[0].name}, Average: ${finalAverage}, Level: ${getSBMInterpretation(parseFloat(finalAverage))}, Rated: ${countRated}/${activeIndicators.length}`
+    );
+
     return res.json({
       message: 'Assessment submitted successfully and officially recorded.',
       calculatedAverage: finalAverage,

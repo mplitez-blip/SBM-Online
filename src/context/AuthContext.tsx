@@ -13,6 +13,7 @@ interface AuthContextType {
   login: (token: string) => Promise<void>;
   logout: () => Promise<void>;
   refreshProfile: () => Promise<void>;
+  refreshUser: () => Promise<void>;
   refreshCustomization: () => Promise<void>;
   apiFetch: (endpoint: string, options?: RequestInit) => Promise<Response>;
 }
@@ -93,6 +94,39 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     refreshProfile();
   }, []);
 
+  // Dynamically apply system configuration to document and root styling
+  useEffect(() => {
+    if (systemConfig) {
+      if (systemConfig.siteTitle) {
+        document.title = `${systemConfig.siteTitle} | ${systemConfig.regionTitle || 'DepEd Regional Office VIII'}`;
+      }
+      if (systemConfig.favicon) {
+        let link: HTMLLinkElement | null = document.querySelector("link[rel*='icon']");
+        if (!link) {
+          link = document.createElement('link');
+          link.rel = 'shortcut icon';
+          document.getElementsByTagName('head')[0].appendChild(link);
+        }
+        link.href = systemConfig.favicon;
+      }
+      if (systemConfig.baseFontSize) {
+        document.documentElement.style.fontSize = `${systemConfig.baseFontSize}px`;
+      }
+      if (systemConfig.primaryColor) {
+        document.documentElement.style.setProperty('--sbm-primary', systemConfig.primaryColor);
+      }
+      if (systemConfig.secondaryColor) {
+        document.documentElement.style.setProperty('--sbm-secondary', systemConfig.secondaryColor);
+      }
+      if (systemConfig.accentColor) {
+        document.documentElement.style.setProperty('--sbm-accent', systemConfig.accentColor);
+      }
+      if (systemConfig.backgroundColor) {
+        document.documentElement.style.setProperty('--sbm-bg', systemConfig.backgroundColor);
+      }
+    }
+  }, [systemConfig]);
+
   const login = async (newToken: string) => {
     localStorage.setItem('sbm_token', newToken);
     setToken(newToken);
@@ -124,6 +158,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         login,
         logout,
         refreshProfile,
+        refreshUser: refreshProfile,
         refreshCustomization,
         apiFetch,
       }}

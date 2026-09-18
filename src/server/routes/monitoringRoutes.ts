@@ -166,6 +166,12 @@ router.get('/', requireAuth, requireRole('regional', 'division'), async (req: Au
         return (valA - valB) * sDir;
       }
 
+      if (sField === 'lastUpdated' || sField === 'submittedAt') {
+        const timeA = valA ? new Date(valA).getTime() : 0;
+        const timeB = valB ? new Date(valB).getTime() : 0;
+        return (timeA - timeB) * sDir;
+      }
+
       if (typeof valA === 'string') {
         return valA.localeCompare(String(valB)) * sDir;
       }
@@ -289,24 +295,44 @@ router.get('/division-summary', requireAuth, requireRole('regional'), async (req
 // GET /api/monitoring/dashboard-stats - KPI stats for Regional and Division dashboards
 router.get('/dashboard-stats', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const activeSyList = await db.select().from(schoolYears).where(eq(schoolYears.isActive, true));
-    const activeSy = activeSyList[0] || null;
+    let targetSy: any = null;
+    if (req.query.schoolYearId) {
+      const syId = parseInt(String(req.query.schoolYearId), 10);
+      if (!isNaN(syId)) {
+        const found = await db.select().from(schoolYears).where(eq(schoolYears.id, syId));
+        if (found.length > 0) targetSy = found[0];
+      }
+    }
 
-    if (!activeSy) {
+    if (!targetSy) {
+      const activeSyList = await db.select().from(schoolYears).where(eq(schoolYears.isActive, true));
+      targetSy = activeSyList[0] || null;
+    }
+
+    if (!targetSy) {
+      const allSy = await db.select().from(schoolYears).orderBy(sql`${schoolYears.id} DESC`).limit(1);
+      targetSy = allSy[0] || null;
+    }
+
+    if (!targetSy) {
       return res.json({
         activeSchoolYear: null,
+        selectedSchoolYear: null,
         divisionsInScope: 0,
         schoolsInScope: 0,
         draftCount: 0,
         submittedCount: 0,
+        submitted: 0,
+        draft: 0,
         notStartedCount: 0,
         averageRating: '0.00',
         completionPercentage: 0,
       });
     }
 
+    const allDivs = await db.select().from(divisions);
     let scopedSchools = await db.select().from(schools);
-    let divisionsCount = 13;
+    let divisionsCount = allDivs.length;
 
     if (req.user!.role === 'division') {
       scopedSchools = scopedSchools.filter((s) => s.divisionId === req.user!.divisionId);
@@ -314,7 +340,7 @@ router.get('/dashboard-stats', requireAuth, async (req: AuthenticatedRequest, re
     }
 
     const schoolIds = new Set(scopedSchools.map((s) => s.id));
-    const allAss = await db.select().from(assessments).where(eq(assessments.schoolYearId, activeSy.id));
+    const allAss = await db.select().from(assessments).where(eq(assessments.schoolYearId, targetSy.id));
     const scopedAss = allAss.filter((a) => schoolIds.has(a.schoolId));
 
     let draftCount = 0;
@@ -339,11 +365,19 @@ router.get('/dashboard-stats', requireAuth, async (req: AuthenticatedRequest, re
     const completionPercentage = scopedSchools.length > 0 ? Math.round((submittedCount / scopedSchools.length) * 100) : 0;
 
     return res.json({
-      activeSchoolYear: activeSy,
+      activeSchoolYear: targetSy,
+      selectedSchoolYear: {
+        id: targetSy.id,
+        name: targetSy.name,
+        isActive: targetSy.isActive,
+        isClosed: targetSy.isClosed,
+      },
       divisionsInScope: divisionsCount,
       schoolsInScope: scopedSchools.length,
-      draftCount,
+      submitted: submittedCount,
+      draft: draftCount,
       submittedCount,
+      draftCount,
       notStartedCount,
       averageRating,
       completionPercentage,
@@ -351,6 +385,27 @@ router.get('/dashboard-stats', requireAuth, async (req: AuthenticatedRequest, re
   } catch (err: any) {
     console.error('Dashboard stats error:', err);
     return res.status(500).json({ error: 'Failed to fetch dashboard stats.' });
+  }
+});
+
+// GET /api/monitoring/districts - List distinct districts (optionally filtered by division)
+router.get('/districts', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    let targetDivisionId: number | null = null;
+    if (req.user!.role === 'division') {
+      targetDivisionId = req.user!.divisionId;
+    } else if (req.query.divisionId) {
+      targetDivisionId = parseInt(String(req.query.divisionId), 10);
+    }
+
+    const allSchools = await db.select({ district: schools.district, divisionId: schools.divisionId }).from(schools);
+    const filtered = targetDivisionId ? allSchools.filter((s) => s.divisionId === targetDivisionId) : allSchools;
+    const distinctDistricts = Array.from(new Set(filtered.map((s) => s.district).filter(Boolean))).sort();
+
+    return res.json(distinctDistricts);
+  } catch (err: any) {
+    console.error('Fetch districts error:', err);
+    return res.status(500).json({ error: 'Failed to fetch districts.' });
   }
 });
 

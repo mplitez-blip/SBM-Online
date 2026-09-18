@@ -24,7 +24,11 @@ interface AffectedRecords {
   indicators: number;
 }
 
-export const SchoolYearManagement: React.FC = () => {
+interface SchoolYearManagementProps {
+  onNavigate?: (view: string, params?: any) => void;
+}
+
+export const SchoolYearManagement: React.FC<SchoolYearManagementProps> = ({ onNavigate }) => {
   const { apiFetch, refreshProfile } = useAuth();
   const [schoolYears, setSchoolYears] = useState<SchoolYearItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -36,6 +40,10 @@ export const SchoolYearManagement: React.FC = () => {
   const [createEmptyForm, setCreateEmptyForm] = useState(false);
   const [cloneFromYearId, setCloneFromYearId] = useState<number | string>('');
   const [actionLoading, setActionLoading] = useState(false);
+
+  // Set Active Modal State
+  const [setActiveTarget, setSetActiveTarget] = useState<SchoolYearItem | null>(null);
+  const [activatingId, setActivatingId] = useState<number | null>(null);
 
   // Delete Modal
   const [deleteTarget, setDeleteTarget] = useState<SchoolYearItem | null>(null);
@@ -120,22 +128,26 @@ export const SchoolYearManagement: React.FC = () => {
   };
 
   // Set Active School Year (Database transaction on server)
-  const handleSetActive = async (id: number, name: string) => {
-    if (!window.confirm(`Set '${name}' as the single active School Year for the entire Region?`)) return;
-
+  const executeSetActive = async (id: number, name: string) => {
     setAlertMsg(null);
+    setActionLoading(true);
+    setActivatingId(id);
     try {
       const res = await apiFetch(`/api/school-years/${id}/active`, { method: 'PUT' });
       const json = await res.json();
       if (!res.ok) {
         setAlertMsg({ type: 'danger', text: json.error || 'Failed to set active school year.' });
       } else {
-        setAlertMsg({ type: 'success', text: json.message });
+        setAlertMsg({ type: 'success', text: json.message || `SY ${name} is now the active School Year.` });
+        setSetActiveTarget(null);
         await loadSchoolYears();
         await refreshProfile();
       }
     } catch (err) {
-      setAlertMsg({ type: 'danger', text: 'Network error.' });
+      setAlertMsg({ type: 'danger', text: 'Network error while setting active school year.' });
+    } finally {
+      setActionLoading(false);
+      setActivatingId(null);
     }
   };
 
@@ -279,12 +291,21 @@ export const SchoolYearManagement: React.FC = () => {
                           </span>
                         ) : (
                           <button
-                            className="btn btn-outline-secondary btn-sm py-0 px-2"
+                            id={`set-active-btn-${sy.id}`}
+                            className="btn btn-outline-primary btn-sm py-0 px-2 fw-semibold shadow-sm"
                             style={{ fontSize: '0.75rem' }}
-                            onClick={() => handleSetActive(sy.id, sy.name)}
+                            onClick={() => setSetActiveTarget(sy)}
+                            disabled={actionLoading && activatingId === sy.id}
                             title="Set as the active School Year for the region"
                           >
-                            Set Active
+                            {actionLoading && activatingId === sy.id ? (
+                              <>
+                                <span className="spinner-border spinner-border-sm me-1" role="status" style={{ width: '0.7rem', height: '0.7rem' }}></span>
+                                Activating...
+                              </>
+                            ) : (
+                              'Set Active'
+                            )}
                           </button>
                         )}
                         {sy.isClosed ? (
@@ -301,29 +322,47 @@ export const SchoolYearManagement: React.FC = () => {
 
                     {/* 3. Published or Draft form */}
                     <td className="text-center">
-                      {sy.formStatus === 'published' ? (
-                        <div>
-                          <span className="badge bg-success-subtle text-success border px-2 py-1">
-                            <i className="bi bi-check-circle me-1"></i> Published
-                          </span>
-                          <div className="text-muted" style={{ fontSize: '0.75rem' }}>
-                            {sy.activeIndicatorCount} indicators
+                      <div className="d-flex flex-column align-items-center gap-1">
+                        {sy.formStatus === 'published' ? (
+                          <div>
+                            <span className="badge bg-success-subtle text-success border px-2 py-1">
+                              <i className="bi bi-check-circle me-1"></i> Published
+                            </span>
+                            <div className="text-muted" style={{ fontSize: '0.75rem' }}>
+                              {sy.activeIndicatorCount} indicators
+                            </div>
                           </div>
-                        </div>
-                      ) : sy.formStatus === 'draft' ? (
-                        <div>
-                          <span className="badge bg-warning-subtle text-warning-emphasis border px-2 py-1">
-                            <i className="bi bi-pencil-square me-1"></i> Draft Form
-                          </span>
-                          <div className="text-muted" style={{ fontSize: '0.75rem' }}>
-                            {sy.activeIndicatorCount} indicators
+                        ) : sy.formStatus === 'draft' ? (
+                          <div>
+                            <span className="badge bg-warning-subtle text-warning-emphasis border px-2 py-1">
+                              <i className="bi bi-pencil-square me-1"></i> Draft Form
+                            </span>
+                            <div className="text-muted" style={{ fontSize: '0.75rem' }}>
+                              {sy.activeIndicatorCount} indicators
+                            </div>
                           </div>
-                        </div>
-                      ) : (
-                        <span className="badge bg-secondary-subtle text-secondary border px-2 py-1">
-                          No Form
-                        </span>
-                      )}
+                        ) : (
+                          <span className="badge bg-secondary-subtle text-secondary border px-2 py-1">
+                            No Form
+                          </span>
+                        )}
+
+                        {/* Shortcut to Assessment Form Builder */}
+                        {onNavigate && (
+                          <button
+                            id={`goto-form-builder-btn-${sy.id}`}
+                            type="button"
+                            className="btn btn-link btn-sm p-0 text-decoration-none d-inline-flex align-items-center gap-1 mt-1 text-primary fw-semibold"
+                            style={{ fontSize: '0.75rem' }}
+                            onClick={() => onNavigate('form-builder', { schoolYearId: sy.id })}
+                            title={`Open Assessment Form Builder for SY ${sy.name}`}
+                          >
+                            <i className="bi bi-sliders2"></i>
+                            <span>Assessment Form Builder</span>
+                            <i className="bi bi-arrow-right-short"></i>
+                          </button>
+                        )}
+                      </div>
                     </td>
 
                     {/* 4. Number of School assessments */}
@@ -593,6 +632,67 @@ export const SchoolYearManagement: React.FC = () => {
                   </button>
                 </div>
               </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Set Active School Year Confirmation Modal */}
+      {setActiveTarget && (
+        <div className="modal d-block" tabIndex={-1} style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
+          <div className="modal-dialog modal-dialog-centered">
+            <div className="modal-content border-0 shadow-lg rounded-3">
+              <div className="modal-header bg-primary text-white py-3">
+                <h5 className="modal-title h6 fw-bold mb-0 d-flex align-items-center gap-2">
+                  <i className="bi bi-calendar-check-fill text-warning"></i> Set Active School Year
+                </h5>
+                <button
+                  type="button"
+                  className="btn-close btn-close-white"
+                  onClick={() => setSetActiveTarget(null)}
+                  disabled={actionLoading}
+                ></button>
+              </div>
+              <div className="modal-body p-4">
+                <p className="mb-3 text-dark">
+                  Are you sure you want to set <strong>SY {setActiveTarget.name}</strong> as the single active School Year for the entire Region?
+                </p>
+                <div className="alert alert-warning py-2 px-3 small d-flex align-items-start gap-2 mb-0">
+                  <i className="bi bi-exclamation-triangle-fill flex-shrink-0 mt-1"></i>
+                  <div>
+                    Setting this year active will atomically switch regional assessment submissions and reports to <strong>SY {setActiveTarget.name}</strong>. Any currently active school year will be set to inactive.
+                  </div>
+                </div>
+              </div>
+              <div className="modal-footer bg-light py-2 px-4 d-flex justify-content-between">
+                <button
+                  type="button"
+                  className="btn btn-outline-secondary btn-sm"
+                  onClick={() => setSetActiveTarget(null)}
+                  disabled={actionLoading}
+                >
+                  Cancel
+                </button>
+                <button
+                  id="confirm-set-active-btn"
+                  type="button"
+                  className="btn btn-primary btn-sm d-flex align-items-center gap-2 shadow-sm"
+                  onClick={() => executeSetActive(setActiveTarget.id, setActiveTarget.name)}
+                  disabled={actionLoading}
+                >
+                  {actionLoading ? (
+                    <>
+                      <span className="spinner-border spinner-border-sm" role="status"></span>
+                      Activating...
+                    </>
+                  ) : (
+                    <>
+                      <i className="bi bi-check-circle-fill"></i>
+                      Confirm & Set Active
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
           </div>
         </div>

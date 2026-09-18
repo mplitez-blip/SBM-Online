@@ -16,6 +16,7 @@ import { MonitoringView } from './components/monitoring/MonitoringView.tsx';
 import { SchoolYearManagement } from './components/school-years/SchoolYearManagement.tsx';
 import { FormBuilder } from './components/form-builder/FormBuilder.tsx';
 import { SchoolManagement } from './components/schools/SchoolManagement.tsx';
+import { DivisionManagement } from './components/divisions/DivisionManagement.tsx';
 import { RegionalCustomization } from './components/customization/RegionalCustomization.tsx';
 
 const AppContent: React.FC = () => {
@@ -96,12 +97,17 @@ const AppContent: React.FC = () => {
 
         {/* School Year Lifecycle View */}
         {currentView === 'school-years' && user.role === 'regional' && (
-          <SchoolYearManagement />
+          <SchoolYearManagement onNavigate={handleNavigate} />
         )}
 
         {/* Form Builder View */}
         {currentView === 'form-builder' && user.role === 'regional' && (
-          <FormBuilder />
+          <FormBuilder initialSchoolYearId={viewParams?.schoolYearId} />
+        )}
+
+        {/* Division Accounts Management View */}
+        {currentView === 'divisions' && user.role === 'regional' && (
+          <DivisionManagement />
         )}
 
         {/* School Accounts Management View */}

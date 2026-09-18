@@ -35,35 +35,48 @@ export const SchoolAssessment: React.FC<SchoolAssessmentProps> = ({ onBack, targ
     try {
       const url = effectiveSchoolId ? `/api/assessments/active?schoolId=${effectiveSchoolId}` : '/api/assessments/active';
       const res = await apiFetch(url);
-      if (res.ok) {
-        const json = await res.json();
-        setData(json);
+      const json = await res.json();
+      if (!res.ok || !json.available) {
+        setData({
+          available: false,
+          error: json.error || json.message || 'Access rejected.',
+          message: json.message || json.error || 'No active assessment available.',
+          schoolYear: json.schoolYear,
+        });
+        return;
+      }
 
-        if (json.form?.sections?.length > 0) {
-          setActiveSectionId(json.form.sections[0].id);
+      setData(json);
 
-          // Populate responses map
-          const respMap = new Map<number, { rating: number; remarks: string }>();
-          for (const sec of json.form.sections) {
-            for (const ind of sec.indicators || []) {
-              respMap.set(ind.id, {
-                rating: ind.rating || 0,
-                remarks: ind.remarks || '',
-              });
-            }
+      if (json.form?.sections?.length > 0) {
+        setActiveSectionId(json.form.sections[0].id);
+
+        // Populate responses map
+        const respMap = new Map<number, { rating: number; remarks: string }>();
+        for (const sec of json.form.sections) {
+          for (const ind of sec.indicators || []) {
+            respMap.set(ind.id, {
+              rating: ind.rating || 0,
+              remarks: ind.remarks || '',
+            });
           }
-          setResponses(respMap);
         }
+        setResponses(respMap);
+      }
 
-        if (json.assessment) {
-          setGlobalRemarks(json.assessment.globalRemarks || '');
-          if (json.assessment.submittedByName) {
-            setSubmitterName(json.assessment.submittedByName);
-          }
+      if (json.assessment) {
+        setGlobalRemarks(json.assessment.globalRemarks || '');
+        if (json.assessment.submittedByName) {
+          setSubmitterName(json.assessment.submittedByName);
         }
       }
     } catch (err) {
       console.error('Failed to load school assessment:', err);
+      setData({
+        available: false,
+        error: 'Connection error while loading assessment.',
+        message: 'Could not connect to the server to load the active assessment.',
+      });
     } finally {
       setLoading(false);
     }
@@ -287,6 +300,35 @@ export const SchoolAssessment: React.FC<SchoolAssessmentProps> = ({ onBack, targ
         </div>
       )}
 
+      {/* Locked Assessment Banner */}
+      {isLocked && (
+        <div className="alert alert-secondary border d-flex align-items-center gap-3 mb-4 p-3 shadow-sm rounded-3">
+          <i className="bi bi-lock-fill fs-3 text-secondary"></i>
+          <div>
+            <div className="fw-bold text-dark">This assessment is locked against modifications</div>
+            <div className="small text-muted">
+              Submitted on {assessment.submittedAt ? new Date(assessment.submittedAt).toLocaleDateString() : 'earlier'}
+              {assessment.submittedByName ? ` by ${assessment.submittedByName}` : ''}.
+              Regional Office policy has locked finalized assessments for School Year {data.schoolYear?.name}. Historical and submitted results remain read-only.
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Submitted with Editing Permitted Notice */}
+      {assessment.status === 'Submitted' && form.allowEditAfterSubmission && (
+        <div className="alert alert-info border d-flex align-items-center gap-3 mb-4 p-3 shadow-sm rounded-3">
+          <i className="bi bi-pencil-square fs-3 text-primary"></i>
+          <div>
+            <div className="fw-bold text-dark">Assessment Submitted (Editing Permitted)</div>
+            <div className="small text-muted">
+              Submitted on {assessment.submittedAt ? new Date(assessment.submittedAt).toLocaleDateString() : 'earlier'}.
+              Regional Office allows modifications for this school year. You can update indicator ratings and save drafts or re-submit.
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Instructions & Progress Card */}
       <div className="card border-0 shadow-sm rounded-3 mb-4">
         <div className="card-body p-3">
@@ -489,6 +531,37 @@ export const SchoolAssessment: React.FC<SchoolAssessmentProps> = ({ onBack, targ
               })}
             </div>
           </div>
+          {form.sections && form.sections.length > 1 && (
+            <div className="card-footer bg-light py-2 px-3 d-flex justify-content-between align-items-center">
+              <button
+                type="button"
+                className="btn btn-outline-secondary btn-sm"
+                disabled={form.sections.findIndex((s: any) => s.id === currentSection?.id) <= 0}
+                onClick={() => {
+                  const idx = form.sections.findIndex((s: any) => s.id === currentSection?.id);
+                  if (idx > 0) setActiveSectionId(form.sections[idx - 1].id);
+                }}
+              >
+                <i className="bi bi-chevron-left me-1"></i> Previous Section
+              </button>
+
+              <span className="small text-muted">
+                Dimension {(form.sections.findIndex((s: any) => s.id === currentSection?.id) + 1)} of {form.sections.length}
+              </span>
+
+              <button
+                type="button"
+                className="btn btn-outline-primary btn-sm"
+                disabled={form.sections.findIndex((s: any) => s.id === currentSection?.id) >= form.sections.length - 1}
+                onClick={() => {
+                  const idx = form.sections.findIndex((s: any) => s.id === currentSection?.id);
+                  if (idx < form.sections.length - 1) setActiveSectionId(form.sections[idx + 1].id);
+                }}
+              >
+                Next Section <i className="bi bi-chevron-right ms-1"></i>
+              </button>
+            </div>
+          )}
         </div>
       )}
 

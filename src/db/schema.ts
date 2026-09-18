@@ -6,7 +6,9 @@ export const divisions = pgTable('divisions', {
   id: serial('id').primaryKey(),
   divisionCode: text('division_code').notNull().unique(),
   divisionName: text('division_name').notNull(),
+  logo: text('logo'),
   createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
 });
 
 // Schools
@@ -18,6 +20,7 @@ export const schools = pgTable('schools', {
   district: text('district').notNull(),
   classification: text('classification').notNull(),
   schoolHead: text('school_head').notNull(),
+  logo: text('logo'),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
 });
@@ -40,6 +43,7 @@ export const users = pgTable('users', {
   divisionId: integer('division_id').references(() => divisions.id, { onDelete: 'set null' }),
   schoolId: integer('school_id').references(() => schools.id, { onDelete: 'cascade' }),
   fullName: text('full_name').notNull(),
+  logo: text('logo'),
   isActive: boolean('is_active').notNull().default(true),
   failedAttempts: integer('failed_attempts').notNull().default(0),
   lockoutUntil: timestamp('lockout_until'),
@@ -131,6 +135,7 @@ export const systemCustomization = pgTable('system_customization', {
   siteTitle: text('site_title').notNull().default('Project SBM Online'),
   regionTitle: text('region_title').notNull().default('Department of Education Regional Office VIII'),
   navbarLogo: text('navbar_logo'),
+  regionLogo: text('region_logo'),
   favicon: text('favicon'),
   baseFontSize: integer('base_font_size').notNull().default(15),
   primaryColor: text('primary_color').notNull().default('#0d6efd'),
