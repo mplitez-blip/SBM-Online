@@ -538,3 +538,31 @@ Quality Assurance Division (QAD) & Regional IT Officer`;
 
   console.log('--- SBM Online Database Seeding Complete ---');
 }
+
+const isDirectExecution =
+  process.argv[1] &&
+  import.meta.url === new URL(`file://${process.argv[1]}`).href;
+
+if (isDirectExecution) {
+  if (
+    process.env.NODE_ENV !== 'development' ||
+    process.env.ALLOW_DEVELOPMENT_SEED !== 'true'
+  ) {
+    console.error(
+      'Development seeding is disabled. Set NODE_ENV=development and ' +
+      'ALLOW_DEVELOPMENT_SEED=true to run this command.'
+    );
+    process.exit(1);
+  }
+
+  seedDatabase()
+    .then(() => {
+      console.log('Development seed completed.');
+      process.exit(0);
+    })
+    .catch((error) => {
+      console.error('Development seed failed.');
+      console.error(error);
+      process.exit(1);
+    });
+}
