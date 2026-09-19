@@ -1,39 +1,47 @@
-import { defineConfig } from "drizzle-kit";
-import * as dotenv from "dotenv";
+import { defineConfig } from 'drizzle-kit';
+import * as dotenv from 'dotenv';
 
-// Load environment variables from .env file.
 dotenv.config();
 
 const sqlHost = process.env.SQL_HOST;
+const sqlPort = Number(process.env.SQL_PORT || 5432);
 const sqlDbName = process.env.SQL_DB_NAME;
-const user = process.env.SQL_ADMIN_USER;
-const password = process.env.SQL_ADMIN_PASSWORD;
+const sqlUser = process.env.SQL_USER;
+const sqlPassword = process.env.SQL_PASSWORD;
 
 if (!sqlHost) {
-  throw new Error("SQL_HOST must be set in environment variables.");
+  throw new Error('SQL_HOST must be set.');
 }
+
 if (!sqlDbName) {
-  throw new Error("SQL_DB_NAME must be set in environment variables.");
+  throw new Error('SQL_DB_NAME must be set.');
 }
-if (!user) {
-  throw new Error("SQL_ADMIN_USER must be set in environment variables.");
+
+if (!sqlUser) {
+  throw new Error('SQL_USER must be set.');
 }
-if (!password) {
-  throw new Error("SQL_ADMIN_PASSWORD must be set in environment variables.");
+
+if (!sqlPassword) {
+  throw new Error('SQL_PASSWORD must be set.');
 }
-console.log(`Using user: ${user} to connect to database.`);
+
+if (!Number.isInteger(sqlPort) || sqlPort < 1 || sqlPort > 65535) {
+  throw new Error('SQL_PORT must be a valid integer between 1 and 65535.');
+}
 
 export default defineConfig({
-  schema: "./src/db/schema.ts",
-  out: "./drizzle", // Output directory for migrations.
-  dialect: "postgresql",
-  schemaFilter: ["public"],
+  schema: './src/db/schema.ts',
+  out: './drizzle',
+  dialect: 'postgresql',
+  schemaFilter: ['public'],
   dbCredentials: {
     host: sqlHost,
-    user: user,
-    password: password,
+    port: sqlPort,
+    user: sqlUser,
+    password: sqlPassword,
     database: sqlDbName,
-    ssl: false, // Typically false when connecting via Cloud SQL Auth Proxy.
+    ssl: false,
   },
-  verbose: true, // Enable verbose output.
+  verbose: true,
+  strict: true,
 });

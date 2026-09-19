@@ -1,7 +1,6 @@
 import express from 'express';
 import cookieParser from 'cookie-parser';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import authRoutes from './src/server/routes/authRoutes.ts';
 import schoolYearRoutes from './src/server/routes/schoolYearRoutes.ts';
 import formBuilderRoutes from './src/server/routes/formBuilderRoutes.ts';
@@ -11,21 +10,22 @@ import assessmentRoutes from './src/server/routes/assessmentRoutes.ts';
 import monitoringRoutes from './src/server/routes/monitoringRoutes.ts';
 import customizationRoutes from './src/server/routes/customizationRoutes.ts';
 import exportRoutes from './src/server/routes/exportRoutes.ts';
-import { seedDatabase } from './src/db/seed.ts';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const projectRoot = process.cwd();
 
 async function startServer() {
-  // Ensure database is initialized and seeded
-  try {
-    await seedDatabase();
-  } catch (seedErr) {
-    console.error('Error during initial database seeding:', seedErr);
-  }
-
   const app = express();
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT || 3000);
+  const HOST =
+    process.env.HOST ||
+    (process.env.NODE_ENV === 'production' ||
+    process.env.NODE_ENV === 'staging'
+      ? '127.0.0.1'
+      : '0.0.0.0');
+
+  if (!Number.isInteger(PORT) || PORT < 1 || PORT > 65535) {
+    throw new Error('PORT must be a valid integer between 1 and 65535.');
+  }
 
   // Body parsing and cookies
   app.use(express.json({ limit: '10mb' }));
@@ -76,15 +76,15 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = path.join(process.cwd(), 'dist');
+    const distPath = path.join(projectRoot, 'dist');
     app.use(express.static(distPath));
     app.get('*', (req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`[Project SBM Online] Server running on http://0.0.0.0:${PORT}`);
+  app.listen(PORT, HOST, () => {
+    console.log(`[Project SBM Online] Server running on http://${HOST}:${PORT}`);
   });
 }
 

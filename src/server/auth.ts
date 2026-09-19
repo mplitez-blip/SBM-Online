@@ -6,7 +6,19 @@ import { users, auditLogs, schools } from '../db/schema.ts';
 import { eq } from 'drizzle-orm';
 import { adminAuth } from '../lib/firebase-admin.ts';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'deped-ro8-sbm-online-super-secret-key-2026-prod';
+function requireJwtSecret(): string {
+  const secret = process.env.JWT_SECRET;
+
+  if (!secret || secret.length < 64) {
+    throw new Error(
+      'JWT_SECRET must be configured with at least 64 characters.',
+    );
+  }
+
+  return secret;
+}
+
+const JWT_SECRET: string = requireJwtSecret();
 
 export interface AuthenticatedUser {
   id: number;

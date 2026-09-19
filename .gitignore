@@ -6,3 +6,9 @@ coverage/
 *.log
 .env*
 !.env.example
+.env
+.env.docker
+
+# Safe environment templates may be committed
+!.env.example
+!.env.docker.example

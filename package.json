@@ -16,7 +16,11 @@
     "test:assessment": "tsx tests/school-assessment-workflow.test.ts",
     "test:customization": "tsx tests/customization-and-assets.test.ts",
     "test:export": "tsx tests/excel-export.test.ts",
-    "test": "tsx tests/authorization.test.ts && tsx tests/school-year-management.test.ts && tsx tests/school-assessment-workflow.test.ts && tsx tests/customization-and-assets.test.ts && tsx tests/excel-export.test.ts"
+    "test": "tsx tests/authorization.test.ts && tsx tests/school-year-management.test.ts && tsx tests/school-assessment-workflow.test.ts && tsx tests/customization-and-assets.test.ts && tsx tests/excel-export.test.ts",
+    "db:generate": "drizzle-kit generate --config=src/db/drizzle.config.ts",
+    "db:migrate": "drizzle-kit migrate --config=src/db/drizzle.config.ts",
+    "db:push": "drizzle-kit push --config=src/db/drizzle.config.ts",
+    "db:seed:development": "tsx src/db/seed.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
