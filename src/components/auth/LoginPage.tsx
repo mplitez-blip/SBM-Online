@@ -130,20 +130,7 @@ export const LoginPage: React.FC = () => {
                 )}
               </div>
 
-              {/* Brand Footer Feature Pills */}
-              <div className="position-relative z-1 pt-4 border-top border-white-25">
-                <div className="d-flex flex-wrap gap-2 small">
-                  <span className="badge bg-white bg-opacity-10 text-white border border-white-25 py-2 px-3">
-                    <i className="bi bi-shield-check me-1 text-warning"></i> Role-Based Access
-                  </span>
-                  <span className="badge bg-white bg-opacity-10 text-white border border-white-25 py-2 px-3">
-                    <i className="bi bi-database-check me-1 text-warning"></i> PostgreSQL Relational DB
-                  </span>
-                  <span className="badge bg-white bg-opacity-10 text-white border border-white-25 py-2 px-3">
-                    <i className="bi bi-lock-fill me-1 text-warning"></i> Secure Session Isolation
-                  </span>
-                </div>
-              </div>
+
             </div>
 
             {/* Right Login Form Card */}
